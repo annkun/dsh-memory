@@ -1,0 +1,7 @@
+# dsh plugin add @fooxe/dsh-memory installs this patch.
+# One insert: the plugin itself. The host provides peer services
+# (@deepseek-ai/cordis, @deepseek-ai/dsh-tools); tools register on load,
+# system-prompt auto-injection activates when the service is present.
+- insert:
+    - id: dsh-memory
+      name: '@fooxe/dsh-memory'
