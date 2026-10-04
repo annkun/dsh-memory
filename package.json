@@ -1,7 +1,7 @@
 {
   "name": "@fooxe/dsh-memory",
   "description": "Hierarchical Claude Code-style persistent memory for DeepSeek Harness: user + project (git-shared) scopes, session-start auto-injection, MEMORY.md index guards. Pure files, zero dependencies.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "publishConfig": {
     "access": "public"
   },
@@ -36,8 +36,8 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=0.1.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.0"
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -60,5 +60,13 @@
   },
   "engines": {
     "node": ">=22.19"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   }
 }
