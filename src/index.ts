@@ -42,7 +42,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 export const name = 'dsh-memory'
 
 /** Host services this plugin consumes. */
-export const inject = ['tools', 'systemPrompt']
+export const inject = ['tools']
 
 /* ------------------------------------------------------------------ *
  * Guards — the Claude Code memory lesson: an index without a cap is  *
@@ -169,14 +169,28 @@ function simpleError(code: string, message: string): { code: string, message: st
  * "wake up with your memories" behavior, now hierarchical: user-level
  * preferences plus project-level (team-shared) memories are seeded together.
  */
+/**
+ * Narrow structural type for the host systemPrompt service, matching the
+ * usage shipped by official tools (dsh-tool-fs: section({name, order, text})
+ * and getSectionOrder(key)). Declared locally because the service's defining
+ * package is internal to the DSH host; hosts without the service simply skip
+ * auto-injection while all four tools keep working.
+ */
+interface SystemPromptService {
+  getSectionOrder(key: string): number
+  section(spec: { name: string, order?: number, text: (args: unknown) => string }): unknown
+}
+
 function registerMemoryGuidance(ctx: Context): void {
+  const systemPrompt = (ctx as unknown as { systemPrompt?: SystemPromptService }).systemPrompt
+  if (systemPrompt === undefined) return // host composition has no systemPrompt service
   let order: number | undefined
   try {
-    order = ctx.systemPrompt.getSectionOrder('TOOLS')
+    order = systemPrompt.getSectionOrder('TOOLS')
   } catch {
     order = undefined
   }
-  ctx.systemPrompt.section({
+  systemPrompt.section({
     name: 'dsh-memory:auto',
     ...(order === undefined ? {} : { order }),
     text: () => {

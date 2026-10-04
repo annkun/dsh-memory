@@ -1,7 +1,7 @@
 {
   "name": "dsh-memory",
   "description": "Hierarchical Claude Code-style persistent memory for DeepSeek Harness: user + project (git-shared) scopes, session-start auto-injection, MEMORY.md index guards. Pure files, zero dependencies.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publishConfig": {
     "access": "public"
   },
@@ -40,13 +40,23 @@
     "@deepseek-ai/dsh-tools": ">=0.1.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-tools": "*",
-    "typescript": "^5.6.0"
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-tools": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-agent": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-scope": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-session": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-user-approval": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-code-runtime": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-timeout": "0.0.1-rc.1",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test tests/basic.test.mjs"
+    "test": "node --test tests/basic.test.mjs tests/smoke.plugin.mjs"
   },
   "engines": {
     "node": ">=22.19"
