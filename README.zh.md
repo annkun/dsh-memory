@@ -28,10 +28,10 @@ DSH 官方的记忆方案默认关闭、要自配第三方 MCP 服务、检索�
 
 ```sh
 npm install -g dsh-memory
-dsh web --patch ./overlay/claude-memory.cordis.yml
+dsh web --patch ./overlay/dsh-memory.cordis.yml
 ```
 
-跨次运行保留：把 `overlay/claude-memory.cordis.yml` 里的 `insert` 补丁合并进 `$DSH_HOME/cordis.patch.yml`。
+跨次运行保留：把 `overlay/dsh-memory.cordis.yml` 里的 `insert` 补丁合并进 `$DSH_HOME/cordis.patch.yml`。
 
 存储：用户级 `~/.dsh/memory/`（可用 `DSH_MEMORY_USER_DIR` 覆盖）；项目级 `<git根>/.dsh/memory/`（随 git 提交）。删哪个目录就清哪个作用域。
 

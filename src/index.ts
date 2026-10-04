@@ -216,6 +216,12 @@ export function apply(ctx: Context): void {
       tags: { type: 'array', items: { type: 'string' }, description: 'Optional topical tags for retrieval.' },
       scope: { type: 'string', enum: ['user', 'project'], description: 'Where to store: "project" = team-shared decisions/conventions, committed to git (default inside a git repository); "user" = personal cross-project preferences (default outside a repo).' },
     },
+    output: {
+      // Loose object schema: execute returns either the success value or a
+      // {code,message} domain-error value (both are valid canonical values).
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+    },
     async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project' }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'Save aborted before completion.')
       const title = args.title.trim().slice(0, 60)
@@ -242,7 +248,7 @@ export function apply(ctx: Context): void {
         notice: `Saved 1 ${scope} memory (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
       }
     },
-    presentCall: args => ({ title: 'Save memory', kind: 'other' as const, detail: args.title }),
+    presentCall: args => ({ card: 'generic' as const, title: `Save memory: ${args.title}` }),
   }))
 
   ctx.tools.register(defineTool({
@@ -252,6 +258,12 @@ export function apply(ctx: Context): void {
       query: { type: 'string', required: true, description: 'Keyword or phrase to look for.' },
       limit: { type: 'number', description: `Max results (default ${DEFAULT_SEARCH_LIMIT}, max 20).` },
       scope: { type: 'string', enum: ['user', 'project'], description: 'Restrict search to one scope; default searches both.' },
+    },
+    output: {
+      // Loose object schema: execute returns either the success value or a
+      // {code,message} domain-error value (both are valid canonical values).
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
     },
     async execute(args: { query: string, limit?: number, scope?: 'user' | 'project' }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'Search aborted.')
@@ -281,7 +293,7 @@ export function apply(ctx: Context): void {
       }
       return { query: q, total: matches.length, matches }
     },
-    presentCall: args => ({ title: 'Search memory', kind: 'other' as const, detail: args.query }),
+    presentCall: args => ({ card: 'generic' as const, title: `Search memory: ${args.query}` }),
   }))
 
   ctx.tools.register(defineTool({
@@ -289,6 +301,12 @@ export function apply(ctx: Context): void {
     description: 'Read one full memory by id (as returned by memory_search or memory_list). Uses when an excerpt looks relevant and the complete context matters. Project scope is checked first, then user scope.',
     parameters: {
       id: { type: 'string', required: true, description: 'Memory id, e.g. 20261004-181500-prefer-pnpm.' },
+    },
+    output: {
+      // Loose object schema: execute returns either the success value or a
+      // {code,message} domain-error value (both are valid canonical values).
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
     },
     async execute(args: { id: string }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'Read aborted.')
@@ -318,7 +336,7 @@ export function apply(ctx: Context): void {
       }
       return simpleError('memory_not_found', `No memory with id ${safe}. Use memory_search to find valid ids.`)
     },
-    presentCall: args => ({ title: 'Read memory', kind: 'other' as const, detail: args.id }),
+    presentCall: args => ({ card: 'generic' as const, title: `Read memory: ${args.id}` }),
   }))
 
   ctx.tools.register(defineTool({
@@ -326,6 +344,12 @@ export function apply(ctx: Context): void {
     description: 'List the most recent memories from both scopes, newest first. Good for a quick orientation at session start; prefer memory_search for topical lookup.',
     parameters: {
       limit: { type: 'number', description: `Max entries per scope (default ${DEFAULT_SEARCH_LIMIT}, max 50).` },
+    },
+    output: {
+      // Loose object schema: execute returns either the success value or a
+      // {code,message} domain-error value (both are valid canonical values).
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
     },
     async execute(args: { limit?: number }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'List aborted.')
@@ -340,6 +364,6 @@ export function apply(ctx: Context): void {
       }
       return out
     },
-    presentCall: () => ({ title: 'List memories', kind: 'other' as const, detail: 'both scopes' }),
+    presentCall: () => ({ card: 'generic' as const, title: 'List memories (both scopes)' }),
   }))
 }

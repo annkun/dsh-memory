@@ -30,10 +30,10 @@ DSH's official memory story delegates to third-party MCP servers: off by default
 
 ```sh
 npm install -g dsh-memory
-dsh web --patch ./overlay/claude-memory.cordis.yml
+dsh web --patch ./overlay/dsh-memory.cordis.yml
 ```
 
-To persist across runs, merge the `insert` patch from `overlay/claude-memory.cordis.yml` into `$DSH_HOME/cordis.patch.yml`.
+To persist across runs, merge the `insert` patch from `overlay/dsh-memory.cordis.yml` into `$DSH_HOME/cordis.patch.yml`.
 
 Storage: user scope `~/.dsh/memory/` (override with `DSH_MEMORY_USER_DIR`); project scope `<git-root>/.dsh/memory/`, committed to git. Delete a scope's directory to forget that scope.
 

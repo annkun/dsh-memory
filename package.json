@@ -1,7 +1,7 @@
 {
   "name": "dsh-memory",
   "description": "Hierarchical Claude Code-style persistent memory for DeepSeek Harness: user + project (git-shared) scopes, session-start auto-injection, MEMORY.md index guards. Pure files, zero dependencies.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publishConfig": {
     "access": "public"
   },
@@ -25,7 +25,7 @@
     "lib/types/**/*.d.ts",
     "README.md",
     "README.zh.md",
-    "overlay/claude-memory.cordis.yml"
+    "overlay/dsh-memory.cordis.yml"
   ],
   "keywords": [
     "dsh",
