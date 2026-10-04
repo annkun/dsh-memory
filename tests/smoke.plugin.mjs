@@ -87,3 +87,20 @@ test('系统提示词注入段含已存记忆（醒来带记忆）', () => {
   assert.ok(text.includes('## Persistent memory'))
   assert.ok(text.includes('Prefer pnpm'))
 })
+
+test('v0.5 去重更新：同主题再存 → 原地更新而非追加', async () => {
+  const again = await tool('memory_save').execute(
+    { title: 'Prefer Pnpm', content: '更新后的偏好：pnpm + pnpm-workspace，绝不用 npm。' }, exec)
+  assert.equal(again.updated, true, '应标记为更新')
+  assert.equal(again.id, savedId, '应复用同一文件 id')
+  const files = await fs.readdir(path.join(tmp, '.dsh', 'memory', 'memories'))
+  assert.equal(files.filter(f => f.includes('prefer-pnpm')).length, 1, '磁盘上仍只有一个文件')
+  const r2 = await tool('memory_list').execute({}, exec)
+  const lines = r2.project.entries.filter(l => l.includes('prefer-pnpm') || l.includes('Prefer Pnpm'))
+  assert.equal(lines.length, 1, '索引仍只有一行')
+})
+
+test('v0.5 索引行带日期（新鲜度可推理）', async () => {
+  const idx = await fs.readFile(path.join(tmp, '.dsh', 'memory', 'MEMORY.md'), 'utf8')
+  assert.ok(/\(\d{4}-\d{2}-\d{2}\)/.test(idx), '索引行应含 YYYY-MM-DD 日期')
+})

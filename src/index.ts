@@ -225,7 +225,8 @@ function excerpt(text: string, query: string, radius = 60): string {
 const SAVE_DESCRIPTION = [
   'Save a durable memory that persists across sessions. Proactively call this whenever the conversation reveals information worth remembering long-term:',
   "the user's preferences, working habits, or corrections; project decisions and their rationale; key facts, numbers, or IDs; task outcomes and lessons learned.",
-  'Do not save secrets (tokens, passwords) or transient details. Prefer several small focused memories over one large one. Scope rule: personal cross-project preferences go to scope "user"; project decisions and conventions go to scope "project" (team-shared, committed to git).',
+  'Scope rule: personal cross-project preferences go to scope "user"; project decisions and conventions go to scope "project" (team-shared, committed to git).',
+  'Write rules: (1) strong-evidence default — before saving, ask "will this still matter a month from now?"; if unsure, skip it, memory noise costs more than memory gaps; (2) dedupe-and-update — saving a topic that already exists updates that memory in place instead of appending a duplicate; (3) never save secrets — if the content contains credentials, tokens, or passwords, refuse to save and tell the user to keep secrets out of chat.',
 ].join(' ')
 
 const SEARCH_DESCRIPTION = 'Search saved memories by keyword (case-insensitive substring match across titles, tags, and content). Call this when prior context, user preferences, or earlier decisions may be relevant to the current task — before re-asking the user.'
@@ -287,7 +288,7 @@ function registerMemoryGuidance(ctx: Context): void {
       return '## Persistent memory (cross-session)\n'
         + sections.join('\n\n')
         + '\n\nUse memory_search / memory_read when prior context, user preferences, or earlier decisions may matter — before re-asking the user. '
-        + 'Proactively memory_save important new facts as they appear: personal preferences → scope "user"; project decisions/conventions → scope "project". Never save secrets or transient details.'
+        + 'Proactively memory_save important new facts as they appear: personal preferences → scope "user"; project decisions/conventions → scope "project". Write rules: ask "will this still matter a month from now?" before saving (skip if unsure — noise costs more than gaps); same-topic saves update the existing memory in place; dated index lines show what is fresh. Never save secrets or transient details.'
     },
   })
 }
@@ -321,20 +322,33 @@ export async function apply(ctx: Context): Promise<void> {
       const base = scopeDir(scope)
       if (base === undefined) return simpleError('no_project_scope', 'No git repository detected here; only the "user" scope is available.')
       const now = new Date()
-      const id = `${timestamp(now)}-${slugify(title)}`
-      const file = path.join(memoryDirOf(base), `${id}.md`)
-      const header = `---\nid: ${id}\nscope: ${scope}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
+      const slug = slugify(title)
+      const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
       await ensureDirs(base)
+      const dir = memoryDirOf(base)
+      // Claude-Code write rule — dedupe-and-update: an existing memory with the
+      // same title slug is updated in place (content replaced, saved_at
+      // refreshed, index line re-dated and moved to top) instead of appending
+      // a near-duplicate.
+      const existing = (await fs.readdir(dir).catch(() => [] as string[]))
+        .find(f => f.endsWith(`-${slug}.md`))
+      const id = existing === undefined ? `${timestamp(now)}-${slug}` : existing.replace(/\.md$/, '')
+      const updated = existing !== undefined
+      const file = path.join(dir, `${id}.md`)
+      const header = `---\nid: ${id}\nscope: ${scope}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
       await fs.writeFile(file, header + content + '\n', 'utf8')
       const tagSuffix = args.tags?.length ? ` \`${args.tags.join('\` \`')}\`` : ''
-      const lines = await readIndex(base)
-      lines.unshift(`- [${title}](memories/${id}.md) — ${content.split('\n')[0]!.slice(0, 80)}${tagSuffix}`)
+      // dated index line: lets the model reason fresh-vs-stale (Claude Code
+      // ships last-modified timestamps on memory files for exactly this)
+      const indexLine = `- [${title}](memories/${id}.md) — ${content.split('\n')[0]!.slice(0, 80)} (${date})${tagSuffix}`
+      const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
+      lines.unshift(indexLine)
       const kept = await writeIndexGuarded(base, lines)
-      const pruned = await pruneMemories(base)
+      const pruned = updated ? 0 : await pruneMemories(base)
       return {
-        id, scope, file, saved: true,
+        id, scope, file, saved: true, updated,
         indexEntries: kept, prunedMemories: pruned,
-        notice: `Saved 1 ${scope} memory (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
+        notice: `${updated ? `Updated existing ${scope} memory ${id}` : `Saved 1 ${scope} memory`} (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
       }
     },
     presentCall: args => ({ card: 'generic' as const, title: `Save memory: ${args.title}` }),

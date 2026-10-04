@@ -50,6 +50,12 @@ Pure files. No server process, no embedding provider, no account, no database. D
 
 Tool descriptions embed proactive-save guidance — preferences, decisions and key facts get saved without being asked; secrets never do.
 
+**Write rules (v0.5, ported from Claude Code / Gemini CLI practice):**
+- **Strong-evidence default** — before saving, the model asks "will this still matter a month from now?"; unsure → skip (memory noise costs more than gaps)
+- **Dedupe-and-update** — saving an existing topic updates that memory in place (content replaced, timestamp refreshed) instead of appending a duplicate
+- **Dated index lines** — every MEMORY.md entry carries `YYYY-MM-DD`, so the model can reason fresh-vs-stale at injection time
+- **Secret redaction** — credentials/tokens/passwords are never saved; the model refuses and says so
+
 ## Quick start
 
 ```sh
