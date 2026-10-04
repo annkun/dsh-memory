@@ -1,0 +1,12 @@
+# Enable Claude Code-style memory tools in a running DSH host.
+# Usage:
+#   dsh web --patch ./overlay/claude-memory.cordis.yml
+# To persist across runs, merge the single insert patch below into
+# $DSH_HOME/cordis.patch.yml (all profiles) or
+# $DSH_HOME/profiles/<name>/cordis.patch.yml (one profile).
+- insert:
+    - id: tool-claude-memory
+      # Point this at the installed package (npm i -g dsh-memory
+      # or install via DSH plugin_manager). Adjust the path if you install
+      # from a local checkout.
+      package: dsh-memory
