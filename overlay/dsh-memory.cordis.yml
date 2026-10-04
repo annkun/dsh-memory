@@ -6,4 +6,4 @@
 # $DSH_HOME/profiles/<name>/cordis.patch.yml (one profile).
 - insert:
     - id: dsh-memory
-      name: '@annkun/dsh-memory'
+      name: '@fooxe/dsh-memory'

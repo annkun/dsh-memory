@@ -32,7 +32,7 @@ DSH 官方的记忆方案是"外挂"：默认关闭、要自配 MCP 服务、无
 ## 快速开始
 
 ```sh
-npm install -g @annkun/dsh-memory
+npm install -g @fooxe/dsh-memory
 dsh web --patch ./overlay/dsh-memory.cordis.yml
 ```
 
