@@ -32,7 +32,7 @@ Tool descriptions carry proactive-save guidance, so the model saves user prefere
 ## Quick start
 
 ```sh
-npm install -g dsh-memory
+npm install -g @annkun/dsh-memory
 dsh web --patch ./overlay/dsh-memory.cordis.yml
 ```
 

@@ -343,7 +343,8 @@ export function apply(ctx: Context): void {
             if (last >= 0xD800 && last <= 0xDBFF) cut = cut.slice(0, -1) // don't split a surrogate pair
             return { id: safe, scope, content: cut, truncated: true, local_file: file, size_bytes, updated_at }
           }
-          return { id: safe, scope, content, truncated: false, size_bytes, updated_at }
+          // identical field set in both branches: Record<string, JsonValue> rejects undefined-valued keys
+          return { id: safe, scope, content, truncated: false, local_file: file, size_bytes, updated_at }
         } catch {
           continue
         }

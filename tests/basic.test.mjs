@@ -53,5 +53,5 @@ test('review guard: plugin name matches package name', async () => {
   const src = await fs.readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
   const pkg = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const m = /export const name = '([^']+)'/.exec(src)
-  assert.equal(m?.[1], pkg.name)
+  assert.ok(pkg.name === m?.[1] || pkg.name.endsWith('/' + m?.[1]), `plugin name '${m?.[1]}' should match unscoped package name '${pkg.name}'`)
 })
