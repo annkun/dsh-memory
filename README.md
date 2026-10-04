@@ -20,7 +20,8 @@ DSH agents start every session from zero — preferences, decisions, and hard-wo
 
 - **User scope** (`~/.dsh/memory`): personal preferences and habits, stored once, available in *every* project. Stop re-explaining "I prefer pnpm" in each repo.
 - **Project scope** (`<git-root>/.dsh/memory`): decisions and conventions stored *inside* their own project, committed to git, shared with the whole team automatically.
-- The two never mix: project A's architectural decisions stay out of project B, while your personal style follows you everywhere. Scope is auto-detected — inside a git repo, saves default to project; outside, to user.
+- The two never mix: project A's architectural decisions stay out of project B, while your personal style follows you everywhere.
+- Scope auto-detection (v0.4): `DSH_MEMORY_PROJECT_DIR` env override > an existing `.dsh/memory` marker above (supports nested sub-project scopes) > any VCS root — `.git`, `.svn` or `.hg` (SVN/Mercurial projects anchor correctly on first use) > the current directory itself (VCS-less projects get their own scope instead of flooding the user bucket). `$HOME`, `/` and `/tmp` never become a scope: a dotfiles `~/.git` cannot turn home into one giant shared bucket.
 
 **2. Session-start auto-injection**
 

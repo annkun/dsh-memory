@@ -50,9 +50,9 @@ test('memory_save 端到端：写文件 + 护栏索引', async () => {
   const saved = await tool('memory_save').execute(
     { title: 'Prefer pnpm', content: '用户偏好：本项目一律用 pnpm，不用 npm。', tags: ['pref'] }, exec)
   assert.equal(saved.saved, true)
-  assert.equal(saved.scope, 'user')
+  assert.equal(saved.scope, 'project') // v0.4: 沙箱无 VCS → cwd 兜底 → 默认项目作用域
   savedId = saved.id
-  const idx = await fs.readFile(path.join(tmp, 'MEMORY.md'), 'utf8')
+  const idx = await fs.readFile(path.join(tmp, '.dsh', 'memory', 'MEMORY.md'), 'utf8') // v0.4: 项目作用域路径
   assert.ok(idx.includes('Prefer pnpm'), '索引应含新记忆')
 })
 
@@ -60,7 +60,7 @@ test('memory_search 大小写不敏感跨域检索', async () => {
   // 文件名命中路径：excerpt 为 '(id match)'，断言 id
   const byId = await tool('memory_search').execute({ query: 'PNPM' }, exec)
   assert.equal(byId.total, 1)
-  assert.equal(byId.matches[0].scope, 'user')
+  assert.equal(byId.matches[0].scope, 'project')
   assert.ok(byId.matches[0].id.includes('prefer-pnpm'), `id 应含 slug: ${byId.matches[0].id}`)
   // 正文命中路径：中文查询只可能在正文，excerpt 应含上下文
   const byContent = await tool('memory_search').execute({ query: '用户偏好' }, exec)
@@ -78,7 +78,7 @@ test('memory_read 返回 Claude 契约字段', async () => {
 
 test('memory_list 双域分组', async () => {
   const r = await tool('memory_list').execute({}, exec)
-  assert.ok(r.user.entries.length >= 1)
+  assert.ok(r.project.entries.length >= 1)
   assert.equal(r.user.truncated, false)
 })
 

@@ -63,23 +63,52 @@ const MAX_CONTENT_CHARS = 20_000
 const USER_DIR = process.env.DSH_MEMORY_USER_DIR
   ?? path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'memory')
 
-function isGitRoot(dir: string): boolean {
-  try {
-    return existsSync(path.join(dir, '.git'))
-  } catch {
-    return false
-  }
-}
+const MAX_WALK_LEVELS = 8
+const MARKER_DIR = path.join('.dsh', 'memory')
+const VCS_MARKERS = ['.git', '.svn', '.hg'] as const
 
-function detectProjectDir(): string | undefined {
-  let cur = process.cwd()
-  for (let i = 0; i < 8; i++) {
-    if (isGitRoot(cur)) return path.join(cur, '.dsh', 'memory')
+export interface ProjectResolution { dir?: string, source: 'env' | 'walk' | 'cwd' | 'none' }
+
+/**
+ * v0.4 project-scope detection chain. Priority = explicitness, most explicit
+ * first; a fused upward walk implements levels 2-3 (own marker beats a VCS
+ * root at the same level, anything at a lower level beats anything higher):
+ *
+ *   1. DSH_MEMORY_PROJECT_DIR env override (user's explicit intent)
+ *   2. an existing .dsh/memory marker above (our own past anchor — supports
+ *      intentional nested sub-project scopes)
+ *   3. a VCS root (.git / .svn / .hg) above (filesystem's project boundary;
+ *      anchors SVN/Hg projects correctly on first use)
+ *   4. cwd itself (workspace-scoped fallback for VCS-less projects)
+ *
+ * Guard: $HOME, /, /tmp and /private/tmp never become a project scope —
+ * a dotfiles ~/.git must not turn home into one giant shared bucket, and
+ * /tmp memories would silently vanish on reboot. When the guard fires the
+ * result is "no project scope" (better no isolation than wrong isolation).
+ * The host workspaceRegistry refinement runs separately in apply() because
+ * it is an async host service.
+ */
+export function resolveProjectScope(startDir: string = process.cwd(), opts: { homeDir?: string } = {}): ProjectResolution {
+  const home = path.resolve(opts.homeDir ?? os.homedir())
+  const guarded = (d: string): boolean => {
+    const r = path.resolve(d)
+    return r === home || r === '/' || r === '/tmp' || r === '/private/tmp'
+  }
+  const envDir = process.env.DSH_MEMORY_PROJECT_DIR
+  if (envDir !== undefined && envDir.trim() !== '' && path.isAbsolute(envDir) && !guarded(envDir)) {
+    return { dir: path.join(path.resolve(envDir), MARKER_DIR), source: 'env' }
+  }
+  let cur = path.resolve(startDir)
+  for (let i = 0; i < MAX_WALK_LEVELS; i++) {
+    if (guarded(cur)) break // never inspect or cross a guarded directory
+    if (existsSync(path.join(cur, MARKER_DIR))) return { dir: path.join(cur, MARKER_DIR), source: 'walk' }
+    if (VCS_MARKERS.some(m => existsSync(path.join(cur, m)))) return { dir: path.join(cur, MARKER_DIR), source: 'walk' }
     const parent = path.dirname(cur)
     if (parent === cur) break
     cur = parent
   }
-  return undefined
+  const start = path.resolve(startDir)
+  return guarded(start) ? { source: 'none' } : { dir: path.join(start, MARKER_DIR), source: 'cwd' }
 }
 
 function scopeDir(scope: 'user' | 'project'): string | undefined {
@@ -87,8 +116,53 @@ function scopeDir(scope: 'user' | 'project'): string | undefined {
   return PROJECT_DIR
 }
 
-const PROJECT_DIR = detectProjectDir()
-const SCOPES: Array<'user' | 'project'> = PROJECT_DIR === undefined ? ['user'] : ['user', 'project']
+const initialResolution = resolveProjectScope()
+let PROJECT_DIR: string | undefined = initialResolution.dir
+let projectDirSource: 'env' | 'walk' | 'cwd' | 'none' | 'workspace' = initialResolution.source
+
+function activeScopes(): Array<'user' | 'project'> {
+  return PROJECT_DIR === undefined ? ['user'] : ['user', 'project']
+}
+
+/**
+ * Async level 3.5: when the sync chain had to fall back to cwd (no marker,
+ * no VCS), the host workspace registry may still know the real project root
+ * the user registered. Best-effort and fully optional — unknown shapes or
+ * failures keep the cwd-fallback scope. Runs inside apply() before any tool
+ * can execute, so the upgrade lands before the first save anchors a marker
+ * in the wrong place.
+ */
+async function refineWithWorkspaceRegistry(ctx: Context): Promise<void> {
+  if (projectDirSource !== 'cwd') return
+  const registry = (ctx as unknown as { workspaceRegistry?: { list(): Promise<unknown[]> } }).workspaceRegistry
+  if (registry === undefined || typeof registry.list !== 'function') return
+  try {
+    const entries = await registry.list()
+    const cwd = process.cwd()
+    let best: string | undefined
+    for (const entry of entries) {
+      const e = entry as Record<string, unknown>
+      const raw = typeof e.directory === 'function' ? String(e.directory()) : e.directory
+      if (typeof raw !== 'string' || !path.isAbsolute(raw)) continue
+      const root = path.resolve(raw)
+      const rel = path.relative(root, cwd)
+      if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+        if (best === undefined || root.length > best.length) best = root // deepest ancestor wins
+      }
+    }
+    if (best !== undefined) {
+      const home = path.resolve(os.homedir())
+      const r = path.resolve(best)
+      const isGuarded = r === home || r === '/' || r === '/tmp' || r === '/private/tmp'
+      if (!isGuarded) {
+        PROJECT_DIR = path.join(best, MARKER_DIR)
+        projectDirSource = 'workspace'
+      }
+    }
+  } catch {
+    // registry unavailable or shape unknown: keep the cwd-fallback scope
+  }
+}
 const memoryDirOf = (base: string) => path.join(base, 'memories')
 const indexFileOf = (base: string) => path.join(base, 'MEMORY.md')
 const INDEX_HEADER = '# Memory Index (newest first; auto-truncated to 200 lines / 25 KB)\n'
@@ -195,7 +269,7 @@ function registerMemoryGuidance(ctx: Context): void {
     ...(order === undefined ? {} : { order }),
     text: () => {
       const sections: string[] = []
-      for (const scope of SCOPES) {
+      for (const scope of activeScopes()) {
         const base = scopeDir(scope)
         if (base === undefined) continue
         let index = ''
@@ -218,7 +292,8 @@ function registerMemoryGuidance(ctx: Context): void {
   })
 }
 
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
+  await refineWithWorkspaceRegistry(ctx)
   registerMemoryGuidance(ctx)
 
   ctx.tools.register(defineTool({
@@ -285,7 +360,7 @@ export function apply(ctx: Context): void {
       if (!q) return simpleError('invalid_input', 'query must be non-empty.')
       const limit = Math.min(Math.max(Math.trunc(args.limit ?? DEFAULT_SEARCH_LIMIT), 1), 20)
       const lower = q.toLowerCase()
-      const scopes = args.scope === undefined ? SCOPES : [args.scope]
+      const scopes = args.scope === undefined ? activeScopes() : [args.scope]
       const matches: Array<{ scope: string, id: string, title: string, excerpt: string }> = []
       for (const scope of scopes) {
         const base = scopeDir(scope)
@@ -370,7 +445,7 @@ export function apply(ctx: Context): void {
       if (exec.signal.aborted) return simpleError('aborted', 'List aborted.')
       const limit = Math.min(Math.max(Math.trunc(args.limit ?? DEFAULT_SEARCH_LIMIT), 1), 50)
       const out: Record<string, { total: number, truncated: boolean, entries: string[] }> = {}
-      for (const scope of SCOPES) {
+      for (const scope of activeScopes()) {
         const base = scopeDir(scope)
         if (base === undefined) continue
         const all = await readIndex(base)
