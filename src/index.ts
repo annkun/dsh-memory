@@ -180,6 +180,16 @@ function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'memory'
 }
 
+/** Slice that never splits a UTF-16 surrogate pair (an emoji would render as \ufffd). */
+function safeSlice(s: string, n: number): string {
+  const cut = s.slice(0, n)
+  const last = cut.charCodeAt(cut.length - 1)
+  return last >= 0xD800 && last <= 0xDBFF ? cut.slice(0, -1) : cut
+}
+
+/** Full-width brackets in free text, so index-line links and the date-anchored path-tag parser stay unambiguous. */
+const indexSafe = (s: string) => s.replace(/\[/g, '\uff3b').replace(/\]/g, '\uff3d')
+
 async function ensureDirs(base: string): Promise<void> {
   await fs.mkdir(memoryDirOf(base), { recursive: true })
 }
@@ -196,7 +206,7 @@ async function readIndex(base: string): Promise<string[]> {
 /** Write one scope's index with both guards applied; returns the kept line count. */
 async function writeIndexGuarded(base: string, lines: string[]): Promise<number> {
   let kept = lines.slice(0, MAX_INDEX_LINES)
-  while (kept.join('\n').length > MAX_INDEX_BYTES && kept.length > 1) {
+  while (Buffer.byteLength(kept.join('\n'), 'utf8') > MAX_INDEX_BYTES && kept.length > 1) { // bytes, not chars: CJK is 3 bytes/char
     kept = kept.slice(0, kept.length - 1) // drop oldest (last) entries
   }
   await ensureDirs(base)
@@ -288,12 +298,16 @@ function registerMemoryGuidance(ctx: Context): void {
           // memories for where you work."
           const projRoot = path.resolve(PROJECT_DIR, '..', '..')
           const cwd = process.cwd()
-          const rel = cwd.startsWith(projRoot) ? path.relative(projRoot, cwd).split(path.sep).join('/') : ''
+          // path-boundary check: a same-prefix sibling (myproj vs myproj0)
+          // must not be treated as inside the project
+          const rel = cwd.startsWith(projRoot + path.sep) ? path.relative(projRoot, cwd).split(path.sep).join('/') : ''
           const matched: string[] = []
           for (const l of lines) {
-            const m = /\[[^\]]+\]/.exec(l.slice(l.indexOf(') —'))) // path tag after ") — "
+            // path tag is anchored right after the (YYYY-MM-DD) date stamp —
+            // brackets inside a title or excerpt can never be misread as a tag
+            const m = /\(\d{4}-\d{2}-\d{2}\) \[([^\]]+)\]/.exec(l)
             if (m === null) { matched.push(l); continue } // no path tag = root-level
-            const memPath = m[0]!.slice(1, -1)
+            const memPath = m[1]!
             if (memPath === rel || rel.startsWith(memPath + '/') || memPath.startsWith(rel + '/')) matched.push(l)
             else hiddenElsewhere++
           }
@@ -346,8 +360,8 @@ export async function apply(ctx: Context): Promise<void> {
     },
     async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project', path?: string }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'Save aborted before completion.')
-      const title = args.title.trim().slice(0, 60)
-      const content = args.content.trim().slice(0, MAX_CONTENT_CHARS)
+      const title = safeSlice(args.title.trim(), 60)
+      const content = safeSlice(args.content.trim(), MAX_CONTENT_CHARS)
       if (!title || !content) return simpleError('invalid_input', 'title and content must be non-empty.')
       let scope = args.scope
       if (scope === undefined) scope = PROJECT_DIR === undefined ? 'user' : 'project'
@@ -370,21 +384,21 @@ export async function apply(ctx: Context): Promise<void> {
       // auto-record sub-directory path (relative to project root) — CLAUDE.md-style:
       // untagged (root-level) memories always inject; path-tagged memories only
       // surface when the session works in that area
-      let memPath = args.path?.trim() ?? ''
+      let memPath = (args.path?.trim() ?? '').replace(/[^a-zA-Z0-9\u4e00-\u9fff/_-]+/g, '-').replace(/^-+|-+$/g, '')
       if (memPath === '' && scope === 'project' && PROJECT_DIR !== undefined) {
         const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
         const cwd = process.cwd()
-        if (cwd.startsWith(projRoot) && cwd !== projRoot) {
+        if (cwd.startsWith(projRoot + path.sep)) {
           memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
         }
       }
-const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
+      const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
       await fs.writeFile(file, header + content + '\n', 'utf8')
       const tagSuffix = args.tags?.length ? ` \`${args.tags.join('\` \`')}\`` : ''
       // dated index line: lets the model reason fresh-vs-stale (Claude Code
       // ships last-modified timestamps on memory files for exactly this)
       const pathTag = memPath !== '' ? ` [${memPath}]` : ''
-      const indexLine = `- [${title}](memories/${id}.md) — ${content.split('\n')[0]!.slice(0, 80)} (${date})${pathTag}${tagSuffix}`
+      const indexLine = `- [${indexSafe(title)}](memories/${id}.md) — ${indexSafe(safeSlice(content.split('\n')[0] ?? '', 80))} (${date})${pathTag}${tagSuffix}`
       const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
       lines.unshift(indexLine)
       const kept = await writeIndexGuarded(base, lines)
