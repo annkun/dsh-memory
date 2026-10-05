@@ -19,7 +19,7 @@ DSH agents start every session from zero — preferences, decisions, and hard-wo
 **1. Two-level scopes — cross-project, zero confusion**
 
 - **User scope** (`~/.dsh/memory`): personal preferences and habits, stored once, available in *every* project. Stop re-explaining "I prefer pnpm" in each repo.
-- **Project scope** (`<git-root>/.dsh/memory`): decisions and conventions stored *inside* their own project, committed to git, shared with the whole team automatically.
+- **Project scope** (`<project-root>/.dsh/memory`): decisions and conventions stored *inside* their own project — any VCS (git / SVN / Mercurial) or a plain folder works; commit the directory with your version control and the whole team shares it automatically.
 - The two never mix: project A's architectural decisions stay out of project B, while your personal style follows you everywhere.
 - Scope auto-detection (v0.4): `DSH_MEMORY_PROJECT_DIR` env override > an existing `.dsh/memory` marker above (supports nested sub-project scopes) > any VCS root — `.git`, `.svn` or `.hg` (SVN/Mercurial projects anchor correctly on first use) > the current directory itself (VCS-less projects get their own scope instead of flooding the user bucket). `$HOME`, `/` and `/tmp` never become a scope: a dotfiles `~/.git` cannot turn home into one giant shared bucket.
 
@@ -43,7 +43,7 @@ Pure files. No server process, no embedding provider, no account, no database. D
 
 | Tool | Purpose |
 |---|---|
-| `memory_save` | Save a durable memory; scope defaults to project inside a git repo, user elsewhere |
+| `memory_save` | Save a durable memory; scope defaults to project inside a detected project root, user elsewhere |
 | `memory_search` | Case-insensitive keyword search across both scopes (ids, titles, tags, content) |
 | `memory_read` | Read one full memory (Claude Code contract fields) |
 | `memory_list` | Recent memories per scope, newest first |
@@ -55,6 +55,35 @@ Tool descriptions embed proactive-save guidance — preferences, decisions and k
 - **Dedupe-and-update** — saving an existing topic updates that memory in place (content replaced, timestamp refreshed) instead of appending a duplicate
 - **Dated index lines** — every MEMORY.md entry carries `YYYY-MM-DD`, so the model can reason fresh-vs-stale at injection time
 - **Secret redaction** — credentials/tokens/passwords are never saved; the model refuses and says so
+
+## Memory logic — when · what · which scope
+
+**When to save** (the model judges as information appears): a preference or correction is stated → save now (corrections are the highest-value memories); a decision is made → save; a key number/ID appears → save; an error + fix closes → save. Strong-evidence gate (v0.5): ask "will this still matter in a month?" — if unsure, skip; memory noise costs more than memory gaps.
+
+**Never saved**: secrets / tokens / passwords (refused, out loud), transient state, anything directly readable from the repo, unconfirmed guesses.
+
+**Which scope** — the one-line test: is this fact about *the person* or about *this project*?
+
+| User scope `~/.dsh/memory` | Project scope `<project-root>/.dsh/memory` |
+|---|---|
+| Personal preferences (pnpm, Chinese comments) | Technical decisions (A over B, because C) |
+| Working habits (test before commit) | Conventions (layout, naming, build commands) |
+| Cross-project lessons | Key numbers / IDs (ports, servers, app IDs) |
+| Communication style | Anything the team should share through the repo |
+
+Portability test: still true in a different project? → user scope; only true here → project scope.
+
+## Layered scoping — how the project root is decided
+
+Two physically isolated stores that can never mix: user `~/.dsh/memory` and project `<project-root>/.dsh/memory`. The root is auto-detected by a five-level chain, priority = explicitness (the clearest signal wins):
+
+1. `DSH_MEMORY_PROJECT_DIR` env override (explicit user intent)
+2. An existing `.dsh/memory` marker above (our own past anchor — supports nested sub-project scopes)
+3. Any VCS root above: `.git` / `.svn` / `.hg` (SVN and Mercurial projects anchor correctly on first use)
+4. The host workspaceRegistry (DSH official project registry, async refinement)
+5. The current directory itself (VCS-less projects get their own scope)
+
+Guard: `$HOME`, `/` and `/tmp` never become a scope — a dotfiles `~/.git` cannot turn home into one giant shared bucket. Better no isolation than wrong isolation.
 
 ## Quick start
 
@@ -69,7 +98,7 @@ dsh web --patch ./overlay/dsh-memory.cordis.yml
 Verify in 3 steps (any chat):
 1. "Remember that I prefer pnpm over npm." → `memory_save` fires; `~/.dsh/memory/MEMORY.md` gains an entry.
 2. Start a **new** session: "Which package manager do I prefer?" → answered from the injected index, no re-asking.
-3. Inside a git repo: "Save the decision: we use A instead of B, because C." → lands in `<git-root>/.dsh/memory/`, commit it and the whole team shares it.
+3. Inside a project: "Save the decision: we use A instead of B, because C." → lands in `<project-root>/.dsh/memory/`, commit it and the whole team shares it.
 
 ## Storage layout
 
@@ -77,7 +106,7 @@ Verify in 3 steps (any chat):
 ~/.dsh/memory/                      <- user scope (personal, cross-project)
 |-- MEMORY.md                      <- guarded index, newest first
 |-- memories/20261004-181500-prefer-pnpm.md
-<git-root>/.dsh/memory/             <- project scope (team-shared, committed)
+<project-root>/.dsh/memory/      <- project scope (team-shared)
 ```
 
 Hosts without the `systemPrompt` service simply skip auto-injection — all four tools keep working.
@@ -87,7 +116,7 @@ Hosts without the `systemPrompt` service simply skip auto-injection — all four
 Three levels, all runnable from the repo:
 
 ```sh
-npm install && npm run build && npm test   # 12 tests, zero type errors
+npm install && npm run build && npm test   # 22 tests, zero type errors
 ```
 
 - **Unit** — index truncation, save/search round-trip, review guards (no `require()` in ESM; plugin name matches package name)
@@ -115,8 +144,8 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 **1. 分层作用域——跨项目、零混乱**
 
 - **用户级**（`~/.dsh/memory`）：个人偏好和习惯，存一次，*所有项目*通用。不用每个仓库重新解释"我用 pnpm"
-- **项目级**（`<git根>/.dsh/memory`）：决策和约定存在*它所属的项目里*，随 git 提交，自动共享给全组
-- **两级永不混淆**：A 项目的架构决策不会漏进 B 项目，你的个人风格却处处跟随。作用域自动检测——git 仓库内默认存项目级，仓库外存用户级
+- **项目级**（`<项目根>/.dsh/memory`）：决策和约定存在*它所属的项目里*——任意 VCS（git / SVN / Mercurial）或纯本地目录均可；随版本库提交，自动共享给全组
+- **两级永不混淆**：A 项目的架构决策不会漏进 B 项目，你的个人风格却处处跟随。作用域自动检测——项目内默认存项目级，项目外存用户级（检测链见下方「分层逻辑」）
 
 **2. 会话启动自动注入**
 
@@ -138,12 +167,51 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 
 | 工具 | 作用 |
 |---|---|
-| `memory_save` | 保存持久记忆；git 仓库内默认存项目级，否则存用户级 |
+| `memory_save` | 保存持久记忆；项目内默认存项目级，否则存用户级 |
 | `memory_search` | 大小写不敏感关键词检索（id/标题/标签/正文，跨双域） |
 | `memory_read` | 读完整记忆（Claude Code 契约字段） |
 | `memory_list` | 双域最近记忆列表（新→旧） |
 
 工具描述内置主动保存指引——偏好、决策、关键数字不用吩咐就存，密钥永不存。
+
+工具描述内置主动保存指引——偏好、决策、关键数字不用吩咐就存，密钥永不存。
+
+**写入规则（v0.5，移植自 Claude Code / Gemini CLI 实践）：**
+- **强证据默认**——存前自问“一个月后还有用吗？”，不确定就跳过（记忆噪音比缺口更贵）
+- **去重更新**——同主题再存 → 原地更新该记忆（内容替换、时间戳刷新），不追加重复
+- **日期索引**——MEMORY.md 每条带 YYYY-MM-DD，注入时模型可推理新旧
+- **秘密脱敏**——凭据/令牌/密码永不入库，模型拒绝并明说
+
+## 记忆逻辑——何时记 · 记什么 · 记哪级
+
+**何时记**（模型在信息出现时自动判断）：用户表达偏好或纠正 → 立即记（纠正是最高价值记忆）；决策诞生（选 A 弃 B，因为 C）→ 立即记；关键数字/ID 出现 → 立即记；踩坑+解法闭环 → 立即记。强证据门槛（v0.5）：“一个月后还有用吗？”——不确定就不记，噪音比缺口更贵。
+
+**永不记**：密钥/令牌/密码（拒绝并明说）、临时状态、代码里直接能读到的、未证实的猜测。
+
+**记哪级**——一句话判定：这条信息是关于“这个人”还是关于“这个工程”？
+
+| 记用户级 `~/.dsh/memory` | 记项目级 `<项目根>/.dsh/memory` |
+|---|---|
+| 个人偏好（我用 pnpm、注释用中文） | 技术决策（用 A 方案，因为 C） |
+| 工作习惯（先跑测试再提交） | 项目约定（目录结构、命名规范、构建命令） |
+| 跨项目经验（“这类库都有 X 坑”） | 关键数字/ID（端口、服务器、AppID） |
+| 沟通风格 | 一切该随版本库共享给团队的东西 |
+
+可移植性测试：换个项目这条还成立吗？成立 → 用户级；不成立 → 项目级。
+
+## 分层逻辑——项目根如何判定
+
+两个物理隔离的存储域，永不混淆：用户级 `~/.dsh/memory`（个人记忆，跨所有项目）+ 项目级 `<项目根>/.dsh/memory`（团队记忆，随版本库共享，git/SVN/Mercurial 或纯目录均可）。
+
+项目根自动判定——五级检测链，优先级 = 显式性（越明确的信号越优先）：
+
+1. `DSH_MEMORY_PROJECT_DIR` 环境变量（用户显式指定）
+2. 向上找已存在的 `.dsh/memory` 标记（自标识锚点，支持嵌套子项目）
+3. 向上找任意 VCS 根：`.git` / `.svn` / `.hg`（SVN、Mercurial 首次使用即正确锚定）
+4. 宿主 workspaceRegistry（DSH 官方项目注册表，异步精化）
+5. 当前目录兜底（无 VCS 项目也拥有自己的作用域）
+
+护栏：`$HOME`、`/`、`/tmp` 永不成为作用域——dotfiles 玩家的 `~/.git` 无法把家目录变成巨型混合桶。宁可少隔离，不可错隔离。
 
 ## 快速开始
 
@@ -160,7 +228,7 @@ dsh web --patch ./overlay/dsh-memory.cordis.yml
 ## 验证体系
 
 ```sh
-npm install && npm run build && npm test   # 12 项测试，0 类型错误
+npm install && npm run build && npm test   # 22 项测试，0 类型错误
 ```
 
 dsh-memory 与 DSH 官方的 MCP 记忆方案完全共存——按工作流任选，或两者同用。
