@@ -279,9 +279,25 @@ function registerMemoryGuidance(ctx: Context): void {
         } catch {
           continue // nothing remembered in this scope yet
         }
-        const lines = index.split('\n').filter(l => l.startsWith('- ')).slice(0, 25)
+        let lines = index.split('\n').filter(l => l.startsWith('- '))
+        if (scope === 'project' && PROJECT_DIR !== undefined) {
+          // CLAUDE.md-style lazy injection: root-level (untagged) project
+          // memories always inject; path-tagged memories only inject when the
+          // session's working directory falls inside that path — "you see
+          // memories for where you work."
+          const projRoot = path.resolve(PROJECT_DIR, '..', '..')
+          const cwd = process.cwd()
+          const rel = cwd.startsWith(projRoot) ? path.relative(projRoot, cwd).split(path.sep).join('/') : ''
+          lines = lines.filter(l => {
+            const m = /\[[^\]]+\]/.exec(l.slice(l.indexOf(') —'))) // path tag after ") — "
+            if (m === null) return true // no path tag = root-level
+            const memPath = m[0]!.slice(1, -1)
+            return memPath === rel || rel.startsWith(memPath + '/') || memPath.startsWith(rel + '/')
+          })
+        }
+        lines = lines.slice(0, 25)
         if (lines.length === 0) continue
-        const label = scope === 'user' ? 'User memories (cross-project, personal)' : 'Project memories (team-shared)'
+        const label = scope === 'user' ? 'User memories (cross-project, personal)' : 'Project memories (team-shared, filtered to your working area)'
         sections.push(`### ${label}, newest first:\n` + lines.join('\n'))
       }
       if (sections.length === 0) return ''
@@ -305,6 +321,7 @@ export async function apply(ctx: Context): Promise<void> {
       content: { type: 'string', required: true, description: 'The memory itself. Self-contained plain text or markdown; will matter months later without this chat.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Optional topical tags for retrieval.' },
       scope: { type: 'string', enum: ['user', 'project'], description: 'Where to store: "project" = team-shared decisions/conventions, committed to git (default inside a git repository); "user" = personal cross-project preferences (default outside a repo).' },
+      path: { type: 'string', description: 'Optional sub-directory this memory belongs to (relative to project root, e.g. "frontend/src"). Auto-recorded from working directory if omitted. Untagged (root-level) memories always inject; path-tagged memories only inject when the session works in that area.' },
     },
     output: {
       // Loose object schema: execute returns either the success value or a
@@ -312,7 +329,7 @@ export async function apply(ctx: Context): Promise<void> {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
     },
-    async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project' }, exec) {
+    async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project', path?: string }, exec) {
       if (exec.signal.aborted) return simpleError('aborted', 'Save aborted before completion.')
       const title = args.title.trim().slice(0, 60)
       const content = args.content.trim().slice(0, MAX_CONTENT_CHARS)
@@ -335,12 +352,24 @@ export async function apply(ctx: Context): Promise<void> {
       const id = existing === undefined ? `${timestamp(now)}-${slug}` : existing.replace(/\.md$/, '')
       const updated = existing !== undefined
       const file = path.join(dir, `${id}.md`)
-      const header = `---\nid: ${id}\nscope: ${scope}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
+      // auto-record sub-directory path (relative to project root) — CLAUDE.md-style:
+// untagged (root-level) memories always inject; path-tagged memories only
+// surface when the session works in that area
+let memPath = args.path?.trim() ?? ''
+if (memPath === '' && scope === 'project' && PROJECT_DIR !== undefined) {
+  const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
+  const cwd = process.cwd()
+  if (cwd.startsWith(projRoot) && cwd !== projRoot) {
+    memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
+  }
+}
+const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
       await fs.writeFile(file, header + content + '\n', 'utf8')
       const tagSuffix = args.tags?.length ? ` \`${args.tags.join('\` \`')}\`` : ''
       // dated index line: lets the model reason fresh-vs-stale (Claude Code
       // ships last-modified timestamps on memory files for exactly this)
-      const indexLine = `- [${title}](memories/${id}.md) — ${content.split('\n')[0]!.slice(0, 80)} (${date})${tagSuffix}`
+      const pathTag = memPath !== '' ? ` [${memPath}]` : ''
+      const indexLine = `- [${title}](memories/${id}.md) — ${content.split('\n')[0]!.slice(0, 80)} (${date})${pathTag}${tagSuffix}`
       const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
       lines.unshift(indexLine)
       const kept = await writeIndexGuarded(base, lines)

@@ -73,6 +73,8 @@ Tool descriptions embed proactive-save guidance — preferences, decisions and k
 
 Portability test: still true in a different project? → user scope; only true here → project scope.
 
+**Path-tagged memories (v0.6, CLAUDE.md-style lazy injection)**: project-scope memories are automatically tagged with the sub-directory they were saved in. Root-level (untagged) memories always inject into the system prompt; path-tagged memories only inject when the session's working directory falls inside that path — "you see memories for where you work", exactly like nested CLAUDE.md files. The `path` parameter on `memory_save` also accepts an explicit override.
+
 ## Layered scoping — how the project root is decided
 
 Two physically isolated stores that can never mix: user `~/.dsh/memory` and project `<project-root>/.dsh/memory`. The root is auto-detected by a five-level chain, priority = explicitness (the clearest signal wins):
@@ -198,6 +200,8 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 | 沟通风格 | 一切该随版本库共享给团队的东西 |
 
 可移植性测试：换个项目这条还成立吗？成立 → 用户级；不成立 → 项目级。
+
+**路径标签记忆（v0.6，CLAUDE.md 式按需注入）**：项目级记忆自动记录保存时所在的子目录。根级（无标签）记忆始终注入系统提示词；带路径标签的记忆只在会话工作目录落在该路径内时才注入——“你在哪里工作，就看到哪里的记忆”，与嵌套 CLAUDE.md 完全同理。`memory_save` 的 `path` 参数也支持显式指定。
 
 ## 分层逻辑——项目根如何判定
 
