@@ -104,3 +104,24 @@ test('v0.5 索引行带日期（新鲜度可推理）', async () => {
   const idx = await fs.readFile(path.join(tmp, '.dsh', 'memory', 'MEMORY.md'), 'utf8')
   assert.ok(/\(\d{4}-\d{2}-\d{2}\)/.test(idx), '索引行应含 YYYY-MM-DD 日期')
 })
+
+test('v0.7 两段式提示：其他区域记忆不注入但明示可搜', async () => {
+  // cwd = tmp = 项目根，不属于 backend/ → 该记忆被惰性过滤，但注入段应明示其存在
+  await tool('memory_save').execute(
+    { title: 'API gateway port', content: 'backend 网关固定用 8080 端口，勿改。', path: 'backend' }, exec)
+  const text = sections[0].text({})
+  assert.ok(!text.includes('API gateway port'), '其他区域的记忆不应注入')
+  assert.ok(text.includes('+1 more tagged to other areas'), '应提示还有其他区域记忆可搜')
+})
+
+test('v0.7 工作目录进入子目录后该区域记忆注入', async () => {
+  await fs.mkdir(path.join(tmp, 'backend'), { recursive: true })
+  process.chdir(path.join(tmp, 'backend'))
+  try {
+    const text = sections[0].text({})
+    assert.ok(text.includes('API gateway port'), '区域内的记忆应注入')
+    assert.ok(!text.includes('+1 more tagged'), '进入区域后不再有过滤提示（root 级恒注入）')
+  } finally {
+    process.chdir(tmp)
+  }
+})

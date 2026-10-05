@@ -280,6 +280,7 @@ function registerMemoryGuidance(ctx: Context): void {
           continue // nothing remembered in this scope yet
         }
         let lines = index.split('\n').filter(l => l.startsWith('- '))
+        let hiddenElsewhere = 0
         if (scope === 'project' && PROJECT_DIR !== undefined) {
           // CLAUDE.md-style lazy injection: root-level (untagged) project
           // memories always inject; path-tagged memories only inject when the
@@ -288,17 +289,31 @@ function registerMemoryGuidance(ctx: Context): void {
           const projRoot = path.resolve(PROJECT_DIR, '..', '..')
           const cwd = process.cwd()
           const rel = cwd.startsWith(projRoot) ? path.relative(projRoot, cwd).split(path.sep).join('/') : ''
-          lines = lines.filter(l => {
+          const matched: string[] = []
+          for (const l of lines) {
             const m = /\[[^\]]+\]/.exec(l.slice(l.indexOf(') —'))) // path tag after ") — "
-            if (m === null) return true // no path tag = root-level
+            if (m === null) { matched.push(l); continue } // no path tag = root-level
             const memPath = m[0]!.slice(1, -1)
-            return memPath === rel || rel.startsWith(memPath + '/') || memPath.startsWith(rel + '/')
-          })
+            if (memPath === rel || rel.startsWith(memPath + '/') || memPath.startsWith(rel + '/')) matched.push(l)
+            else hiddenElsewhere++
+          }
+          lines = matched
         }
-        lines = lines.slice(0, 25)
-        if (lines.length === 0) continue
+        const shown = lines.slice(0, 25)
+        if (shown.length === 0 && hiddenElsewhere === 0) continue
         const label = scope === 'user' ? 'User memories (cross-project, personal)' : 'Project memories (team-shared, filtered to your working area)'
-        sections.push(`### ${label}, newest first:\n` + lines.join('\n'))
+        let sectionText = `### ${label}, newest first:\n` + shown.join('\n')
+        if (hiddenElsewhere > 0) {
+          // Two-stage lazy loading (v0.7): nothing is silently hidden — the
+          // index says how many memories exist outside the current working
+          // area; memory_search surfaces them on demand, so context cost is
+          // paid only when actually needed.
+          const hint = shown.length > 0
+            ? `+${hiddenElsewhere} more tagged to other areas of this project — memory_search surfaces them.`
+            : `all ${hiddenElsewhere} memories in this project are tagged to other areas — memory_search surfaces them.`
+          sectionText += (shown.length > 0 ? '\n' : '') + `(${hint})`
+        }
+        sections.push(sectionText)
       }
       if (sections.length === 0) return ''
       return '## Persistent memory (cross-session)\n'
@@ -353,16 +368,16 @@ export async function apply(ctx: Context): Promise<void> {
       const updated = existing !== undefined
       const file = path.join(dir, `${id}.md`)
       // auto-record sub-directory path (relative to project root) — CLAUDE.md-style:
-// untagged (root-level) memories always inject; path-tagged memories only
-// surface when the session works in that area
-let memPath = args.path?.trim() ?? ''
-if (memPath === '' && scope === 'project' && PROJECT_DIR !== undefined) {
-  const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
-  const cwd = process.cwd()
-  if (cwd.startsWith(projRoot) && cwd !== projRoot) {
-    memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
-  }
-}
+      // untagged (root-level) memories always inject; path-tagged memories only
+      // surface when the session works in that area
+      let memPath = args.path?.trim() ?? ''
+      if (memPath === '' && scope === 'project' && PROJECT_DIR !== undefined) {
+        const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
+        const cwd = process.cwd()
+        if (cwd.startsWith(projRoot) && cwd !== projRoot) {
+          memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
+        }
+      }
 const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
       await fs.writeFile(file, header + content + '\n', 'utf8')
       const tagSuffix = args.tags?.length ? ` \`${args.tags.join('\` \`')}\`` : ''
