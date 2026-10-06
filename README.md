@@ -92,6 +92,10 @@ Guard: `$HOME`, `/` and `/tmp` never become a scope — a dotfiles `~/.git` cann
 ## Quick start
 
 ```sh
+# Recommended — one command installs and enables:
+dsh plugin add @fooxe/dsh-memory
+
+# Or manually — global install (npm or pnpm), then enable via overlay:
 npm install -g @fooxe/dsh-memory
 # or
 pnpm add -g @fooxe/dsh-memory
@@ -224,6 +228,10 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 ## 快速开始
 
 ```sh
+# 推荐——一条命令装好并启用：
+dsh plugin add @fooxe/dsh-memory
+
+# 或手动——全局安装（npm / pnpm 均可）后用 overlay 启用：
 npm install -g @fooxe/dsh-memory
 # 或
 pnpm add -g @fooxe/dsh-memory

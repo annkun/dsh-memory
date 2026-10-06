@@ -49,6 +49,9 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 ## 快速开始
 
 ```sh
+dsh plugin add @fooxe/dsh-memory    # 推荐：一条命令装好并启用
+
+# 或手动（npm / pnpm 均可）：
 npm install -g @fooxe/dsh-memory   # 或 pnpm add -g @fooxe/dsh-memory
 dsh web --patch ./overlay/dsh-memory.cordis.yml
 ```
