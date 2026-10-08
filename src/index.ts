@@ -272,15 +272,20 @@ interface SystemPromptService {
 function registerMemoryGuidance(ctx: Context): void {
   const systemPrompt = (ctx as unknown as { systemPrompt?: SystemPromptService }).systemPrompt
   if (systemPrompt === undefined) return // host composition has no systemPrompt service
-  let order: number | undefined
+  // order is REQUIRED and must be a finite number (dsh-system-prompt throws
+  // on non-finite orders). 'TOOL_GOAL' is an existing official section key —
+  // the memory block sits next to the other cross-turn tool guidance.
+  // 'TOOLS' does not exist and yields NaN (found via real DSH host debugging).
+  let order: number
   try {
-    order = systemPrompt.getSectionOrder('TOOLS')
+    const raw = systemPrompt.getSectionOrder('TOOL_GOAL')
+    order = typeof raw === 'number' && Number.isFinite(raw) ? raw : 500
   } catch {
-    order = undefined
+    order = 500
   }
   systemPrompt.section({
     name: 'dsh-memory:auto',
-    ...(order === undefined ? {} : { order }),
+    order,
     text: () => {
       const sections: string[] = []
       for (const scope of activeScopes()) {

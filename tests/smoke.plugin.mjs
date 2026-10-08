@@ -27,6 +27,7 @@ const exec = { signal: new AbortController().signal }
 let savedId = ''
 
 test('插件注册 4 工具 + 1 系统提示词段', () => {
+  assert.deepEqual([...plugin.inject].sort(), ['systemPrompt', 'tools'], 'inject 必须声明所有被访问的服务（真实宿主缺声明直接拒绝激活）')
   assert.equal(registered.length, 4)
   assert.deepEqual(registered.map(t => t.name).sort(),
     ['memory_list', 'memory_read', 'memory_save', 'memory_search'])
