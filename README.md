@@ -44,6 +44,7 @@ Say *"Remember that I prefer pnpm over npm."* → a `memory_save` tool call appe
 | pnpm `ERR_P..._STORE: Unexpected store location` | Your terminal pnpm differs from DSH's bundled one (11.7.0). Delete the whole profile dir (`~/.dsh/profiles/web`) and re-run `plugin add` — it rebuilds cleanly from scratch |
 | Installed + restarted, still no memory tools | Watch startup logs for `warning: ... did not activate`, and run `dsh --profile web --dump-config \| grep fooxe` to confirm the entry is in the tree; file an issue with the log if the warning persists |
 | `ERR_PNPM_IGNORED_BUILDS` after install | Harmless for this plugin (zero native deps); run `pnpm approve-builds` in the profile dir to clear it |
+| `plugin add` installs an **old version** (e.g. 0.7.2) | Your default registry (a mirror) lags behind npmjs. Pin explicitly: `npx pnpm@11.7.0 add @fooxe/dsh-memory@latest --registry=https://registry.npmjs.org` in the profile dir, or make it permanent by adding `@fooxe:registry=https://registry.npmjs.org` to `~/.npmrc` |
 
 ## Innovations
 
@@ -189,6 +190,7 @@ pnpm dsh plugin --profile web add @fooxe/dsh-memory   # 源码检出方式
 | pnpm `ERR_P..._STORE: Unexpected store location` | 你终端的 pnpm 和 DSH 自带的（11.7.0）版本不一致——把整个 profile 目录（`~/.dsh/profiles/web`）删掉重跑 `plugin add`，全新重建即可 |
 | 装了也重启了还是没有记忆工具 | 看启动日志有没有 `warning: ... did not activate`，并跑 `dsh --profile web --dump-config \| grep fooxe` 确认条目在插件树里；warning 仍在就把日志发 issue |
 | 安装后报 `ERR_PNPM_IGNORED_BUILDS` | 对本插件无害（零原生依赖）；在 profile 目录跑 `pnpm approve-builds` 清掉即可 |
+| `plugin add` 装到**旧版本**（如 0.7.2） | 默认源（镜像）同步滞后。在 profile 目录用官方源显式安装：`npx pnpm@11.7.0 add @fooxe/dsh-memory@latest --registry=https://registry.npmjs.org`；或一劳永逸——`~/.npmrc` 加一行 `@fooxe:registry=https://registry.npmjs.org` |
 
 ## 创新点
 
