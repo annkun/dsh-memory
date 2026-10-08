@@ -41,8 +41,11 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 /** Plugin name registered with the Loader. */
 export const name = 'dsh-memory'
 
-/** Host services this plugin consumes. */
-export const inject = ['tools']
+/** Host services this plugin consumes. Cordis enforces inject: accessing
+ * ctx.systemPrompt without declaring it throws "cannot get property without
+ * inject" and the whole plugin fails to activate (found via real DSH host
+ * debugging; official tool-fs declares ['tools', 'fs', 'systemPrompt']). */
+export const inject = ['tools', 'systemPrompt']
 
 /* ------------------------------------------------------------------ *
  * Guards — the Claude Code memory lesson: an index without a cap is  *
