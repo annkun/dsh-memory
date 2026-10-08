@@ -21,10 +21,11 @@ DSH agents start every session from zero — preferences, decisions, and hard-wo
 **1 · Install (one command)**
 
 ```sh
-dsh plugin --profile web add @fooxe/dsh-memory
+dsh plugin --profile web add @fooxe/dsh-memory        # DSH CLI installed
+pnpm dsh plugin --profile web add @fooxe/dsh-memory   # from a source checkout
 ```
 
-The `--profile` option is **required** and goes **before** `add` — pick the profile you actually boot (`web` for the Web UI; see `~/.dsh/profiles/` for what exists). Manual install via `npm i -g @fooxe/dsh-memory` + `dsh web --patch ./overlay/dsh-memory.cordis.yml` also works, but `plugin add` is the recommended path.
+The `--profile` option is **required** and goes **before** `add` — pick the profile you actually boot (`web` for the Web UI; see `~/.dsh/profiles/` for what exists). Manual install via `npm i -g @fooxe/dsh-memory` (or `pnpm add -g @fooxe/dsh-memory`) + `dsh web --patch ./overlay/dsh-memory.cordis.yml` also works, but `plugin add` is the recommended path.
 
 **2 · Restart DSH — the step everyone misses**
 
@@ -165,10 +166,11 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 **第 1 步 · 安装（一条命令）**
 
 ```sh
-dsh plugin --profile web add @fooxe/dsh-memory
+dsh plugin --profile web add @fooxe/dsh-memory        # 已装 DSH CLI
+pnpm dsh plugin --profile web add @fooxe/dsh-memory   # 源码检出方式
 ```
 
-`--profile` **必填**且放在 `add` 前面——填你实际启动的 profile（Web 界面就是 `web`；已有哪些看 `~/.dsh/profiles/` 目录）。手动方式 `npm i -g @fooxe/dsh-memory` + `dsh web --patch ./overlay/dsh-memory.cordis.yml` 也可以，但推荐 `plugin add`。
+`--profile` **必填**且放在 `add` 前面——填你实际启动的 profile（Web 界面就是 `web`；已有哪些看 `~/.dsh/profiles/` 目录）。手动方式 `npm i -g @fooxe/dsh-memory`（或 `pnpm add -g @fooxe/dsh-memory`）+ `dsh web --patch ./overlay/dsh-memory.cordis.yml` 也可以，但推荐 `plugin add`。
 
 **第 2 步 · 重启 DSH（最容易漏的一步）**
 

@@ -13,7 +13,8 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 前置：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`（源码检出则命令加 `pnpm` 前缀）。
 
 ```sh
-dsh plugin --profile web add @fooxe/dsh-memory   # --profile 必填、放在 add 前
+dsh plugin --profile web add @fooxe/dsh-memory        # 已装 DSH CLI
+pnpm dsh plugin --profile web add @fooxe/dsh-memory   # 源码检出方式（--profile 必填、放在 add 前）
 ```
 
 装完**必须重启 DSH**（工具只在启动时注册），再开新会话说"记住我喜欢 pnpm"验证。
