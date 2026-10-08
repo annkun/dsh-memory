@@ -14,6 +14,25 @@
 
 DSH agents start every session from zero — preferences, decisions, and hard-won context evaporate between conversations. `dsh-memory` fixes that: the agent **saves what matters as it appears** (your preferences, project decisions, key numbers, lessons) and **wakes up with those memories already in context** in every future session.
 
+## Quick start
+
+```sh
+# Recommended — one command installs and enables:
+dsh plugin add @fooxe/dsh-memory
+
+# Or manually — global install (npm or pnpm), then enable via overlay:
+npm install -g @fooxe/dsh-memory
+# or
+pnpm add -g @fooxe/dsh-memory
+
+dsh web --patch ./overlay/dsh-memory.cordis.yml
+```
+
+Verify in 3 steps (any chat):
+1. "Remember that I prefer pnpm over npm." → `memory_save` fires; `~/.dsh/memory/MEMORY.md` gains an entry.
+2. Start a **new** session: "Which package manager do I prefer?" → answered from the injected index, no re-asking.
+3. Inside a project: "Save the decision: we use A instead of B, because C." → lands in `<project-root>/.dsh/memory/`, commit it and the whole team shares it.
+
 ## Innovations
 
 **1. Two-level scopes — cross-project, zero confusion**
@@ -89,25 +108,6 @@ Two physically isolated stores that can never mix: user `~/.dsh/memory` and proj
 
 Guard: `$HOME`, `/` and `/tmp` never become a scope — a dotfiles `~/.git` cannot turn home into one giant shared bucket. Better no isolation than wrong isolation.
 
-## Quick start
-
-```sh
-# Recommended — one command installs and enables:
-dsh plugin add @fooxe/dsh-memory
-
-# Or manually — global install (npm or pnpm), then enable via overlay:
-npm install -g @fooxe/dsh-memory
-# or
-pnpm add -g @fooxe/dsh-memory
-
-dsh web --patch ./overlay/dsh-memory.cordis.yml
-```
-
-Verify in 3 steps (any chat):
-1. "Remember that I prefer pnpm over npm." → `memory_save` fires; `~/.dsh/memory/MEMORY.md` gains an entry.
-2. Start a **new** session: "Which package manager do I prefer?" → answered from the injected index, no re-asking.
-3. Inside a project: "Save the decision: we use A instead of B, because C." → lands in `<project-root>/.dsh/memory/`, commit it and the whole team shares it.
-
 ## Storage layout
 
 ```
@@ -146,6 +146,22 @@ MIT. Not affiliated with DeepSeek or Anthropic.
 ## 这个插件做什么
 
 DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的上下文，聊完就蒸发。`dsh-memory` 解决这个问题：agent **在信息出现时自动存下重要的东西**（你的偏好、项目决策、关键数字、经验教训），并在**之后每次会话开场就带着这些记忆**。
+
+## 快速开始
+
+```sh
+# 推荐——一条命令装好并启用：
+dsh plugin add @fooxe/dsh-memory
+
+# 或手动——全局安装（npm / pnpm 均可）后用 overlay 启用：
+npm install -g @fooxe/dsh-memory
+# 或
+pnpm add -g @fooxe/dsh-memory
+
+dsh web --patch ./overlay/dsh-memory.cordis.yml
+```
+
+**三步验证**：① 说"记住我喜欢 pnpm"→ 看 `~/.dsh/memory/MEMORY.md` 多了条目 ② **新开会话**问"我喜欢什么包管理器"→ 直接答出 ③ git 仓库里说"记住决策：用 A 不用 B，因为 C" → 落进项目记忆，提交 git 全组共享
 
 ## 创新点
 
@@ -224,22 +240,6 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 5. 当前目录兜底（无 VCS 项目也拥有自己的作用域）
 
 护栏：`$HOME`、`/`、`/tmp` 永不成为作用域——dotfiles 玩家的 `~/.git` 无法把家目录变成巨型混合桶。宁可少隔离，不可错隔离。
-
-## 快速开始
-
-```sh
-# 推荐——一条命令装好并启用：
-dsh plugin add @fooxe/dsh-memory
-
-# 或手动——全局安装（npm / pnpm 均可）后用 overlay 启用：
-npm install -g @fooxe/dsh-memory
-# 或
-pnpm add -g @fooxe/dsh-memory
-
-dsh web --patch ./overlay/dsh-memory.cordis.yml
-```
-
-**三步验证**：① 说"记住我喜欢 pnpm"→ 看 `~/.dsh/memory/MEMORY.md` 多了条目 ② **新开会话**问"我喜欢什么包管理器"→ 直接答出 ③ git 仓库里说"记住决策：用 A 不用 B，因为 C" → 落进项目记忆，提交 git 全组共享
 
 ## 验证体系
 

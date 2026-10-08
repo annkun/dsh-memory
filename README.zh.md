@@ -8,6 +8,16 @@
 
 DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的上下文，聊完就蒸发。`dsh-memory` 解决这个问题：agent 在信息出现时自动存下重要的东西（偏好、项目决策、关键数字、经验教训），并在之后每次会话开场就带着这些记忆。
 
+## 快速开始
+
+```sh
+dsh plugin add @fooxe/dsh-memory    # 推荐：一条命令装好并启用
+
+# 或手动（npm / pnpm 均可）：
+npm install -g @fooxe/dsh-memory   # 或 pnpm add -g @fooxe/dsh-memory
+dsh web --patch ./overlay/dsh-memory.cordis.yml
+```
+
 ## 创新点
 
 **1. 分层作用域——跨项目、零混乱**
@@ -45,15 +55,5 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 **两段式可见性（v0.7）**：注入索引始终写明其他区域还有几条记忆（如 `+3 more tagged to other areas`），不静默隐藏，模型按需 `memory_search` 取回。
 
 **项目根五级检测**：环境变量 > 已有标记（支持嵌套子项目）> 任意 VCS 根（.git/.svn/.hg）> 宿主注册表 > 当前目录兜底；$HOME、/、/tmp 永不成为作用域。
-
-## 快速开始
-
-```sh
-dsh plugin add @fooxe/dsh-memory    # 推荐：一条命令装好并启用
-
-# 或手动（npm / pnpm 均可）：
-npm install -g @fooxe/dsh-memory   # 或 pnpm add -g @fooxe/dsh-memory
-dsh web --patch ./overlay/dsh-memory.cordis.yml
-```
 
 与 DSH 官方 MCP 记忆方案完全共存。MIT 协议。
