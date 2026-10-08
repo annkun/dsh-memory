@@ -2,7 +2,7 @@
 
 ![npm](https://img.shields.io/npm/v/@fooxe/dsh-memory) ![license](https://img.shields.io/badge/license-MIT-blue)
 
-**给 DeepSeek Harness 装上跨会话持久记忆——你的 agent 记得住、醒得来、项目之间不串味。**（[English](./README.md)）
+**给 DeepSeek Harness 装上跨会话持久记忆——你的 agent 记得住、醒得来、项目之间不串味。**（[English](../README.md)）
 
 ## 这个插件做什么
 
