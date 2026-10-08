@@ -10,6 +10,8 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 
 ## 快速开始
 
+前置：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`（源码检出则命令加 `pnpm` 前缀）。
+
 ```sh
 dsh plugin add @fooxe/dsh-memory    # 推荐：一条命令装好并启用
 

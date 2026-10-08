@@ -16,6 +16,8 @@ DSH agents start every session from zero — preferences, decisions, and hard-wo
 
 ## Quick start
 
+Prerequisite: the DSH CLI itself — `npm install -g @deepseek-ai/dsh` (or run from a source checkout, prefixing every command with `pnpm`, e.g. `pnpm dsh ...`).
+
 ```sh
 # Recommended — one command installs and enables:
 dsh plugin add @fooxe/dsh-memory
@@ -148,6 +150,8 @@ MIT. Not affiliated with DeepSeek or Anthropic.
 DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的上下文，聊完就蒸发。`dsh-memory` 解决这个问题：agent **在信息出现时自动存下重要的东西**（你的偏好、项目决策、关键数字、经验教训），并在**之后每次会话开场就带着这些记忆**。
 
 ## 快速开始
+
+前置：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`（或从源码检出运行，每条命令加 `pnpm` 前缀，如 `pnpm dsh ...`）。
 
 ```sh
 # 推荐——一条命令装好并启用：
