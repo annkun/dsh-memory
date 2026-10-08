@@ -16,24 +16,33 @@ DSH agents start every session from zero — preferences, decisions, and hard-wo
 
 ## Quick start
 
-Prerequisite: the DSH CLI itself — `npm install -g @deepseek-ai/dsh` (or run from a source checkout, prefixing every command with `pnpm`, e.g. `pnpm dsh ...`).
+**Prerequisite**: the DSH CLI itself — `npm install -g @deepseek-ai/dsh`. From a source checkout, prefix every command with `pnpm` (e.g. `pnpm dsh ...`).
+
+**1 · Install (one command)**
 
 ```sh
-# Recommended — one command installs and enables:
-dsh plugin add @fooxe/dsh-memory
-
-# Or manually — global install (npm or pnpm), then enable via overlay:
-npm install -g @fooxe/dsh-memory
-# or
-pnpm add -g @fooxe/dsh-memory
-
-dsh web --patch ./overlay/dsh-memory.cordis.yml
+dsh plugin --profile web add @fooxe/dsh-memory
 ```
 
-Verify in 3 steps (any chat):
-1. "Remember that I prefer pnpm over npm." → `memory_save` fires; `~/.dsh/memory/MEMORY.md` gains an entry.
-2. Start a **new** session: "Which package manager do I prefer?" → answered from the injected index, no re-asking.
-3. Inside a project: "Save the decision: we use A instead of B, because C." → lands in `<project-root>/.dsh/memory/`, commit it and the whole team shares it.
+The `--profile` option is **required** and goes **before** `add` — pick the profile you actually boot (`web` for the Web UI; see `~/.dsh/profiles/` for what exists). Manual install via `npm i -g @fooxe/dsh-memory` + `dsh web --patch ./overlay/dsh-memory.cordis.yml` also works, but `plugin add` is the recommended path.
+
+**2 · Restart DSH — the step everyone misses**
+
+Tools register **only at service startup**. The plugin stays invisible inside an already-running session even after a successful install. Stop the service (Ctrl+C), start it again, then open a **new** chat.
+
+**3 · Verify (30 seconds)**
+
+Say *"Remember that I prefer pnpm over npm."* → a `memory_save` tool call appears. Open a **new** session and ask *"Which package manager do I prefer?"* → answered instantly from the injected index. `~/.dsh/memory/MEMORY.md` now exists. Inside a project, decisions land in `<project-root>/.dsh/memory/` — commit it and the whole team shares it.
+
+### Troubleshooting (every row battle-tested on a real install)
+
+| Symptom | Fix |
+|---|---|
+| `dsh: command not found` | Install the DSH CLI first — see Prerequisite |
+| `required option '--profile <name>'` | It goes **before** the subcommand: `dsh plugin --profile web add ...` |
+| pnpm `ERR_P..._STORE: Unexpected store location` | Your terminal pnpm differs from DSH's bundled one (11.7.0). Delete the whole profile dir (`~/.dsh/profiles/web`) and re-run `plugin add` — it rebuilds cleanly from scratch |
+| Installed + restarted, still no memory tools | Watch startup logs for `warning: ... did not activate`, and run `dsh --profile web --dump-config \| grep fooxe` to confirm the entry is in the tree; file an issue with the log if the warning persists |
+| `ERR_PNPM_IGNORED_BUILDS` after install | Harmless for this plugin (zero native deps); run `pnpm approve-builds` in the profile dir to clear it |
 
 ## Innovations
 
@@ -151,21 +160,33 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 
 ## 快速开始
 
-前置：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`（或从源码检出运行，每条命令加 `pnpm` 前缀，如 `pnpm dsh ...`）。
+**前置**：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`。从源码检出运行的话，每条命令加 `pnpm` 前缀（如 `pnpm dsh ...`）。
+
+**第 1 步 · 安装（一条命令）**
 
 ```sh
-# 推荐——一条命令装好并启用：
-dsh plugin add @fooxe/dsh-memory
-
-# 或手动——全局安装（npm / pnpm 均可）后用 overlay 启用：
-npm install -g @fooxe/dsh-memory
-# 或
-pnpm add -g @fooxe/dsh-memory
-
-dsh web --patch ./overlay/dsh-memory.cordis.yml
+dsh plugin --profile web add @fooxe/dsh-memory
 ```
 
-**三步验证**：① 说"记住我喜欢 pnpm"→ 看 `~/.dsh/memory/MEMORY.md` 多了条目 ② **新开会话**问"我喜欢什么包管理器"→ 直接答出 ③ git 仓库里说"记住决策：用 A 不用 B，因为 C" → 落进项目记忆，提交 git 全组共享
+`--profile` **必填**且放在 `add` 前面——填你实际启动的 profile（Web 界面就是 `web`；已有哪些看 `~/.dsh/profiles/` 目录）。手动方式 `npm i -g @fooxe/dsh-memory` + `dsh web --patch ./overlay/dsh-memory.cordis.yml` 也可以，但推荐 `plugin add`。
+
+**第 2 步 · 重启 DSH（最容易漏的一步）**
+
+工具**只在服务启动那一刻注册**——装完后运行中的会话里看不到插件。把服务 Ctrl+C 停掉、重新启动、再**开新会话**。
+
+**第 3 步 · 验证（30 秒）**
+
+说一句*"记住我喜欢 pnpm，不用 npm"* → 出现 `memory_save` 工具调用。**新开会话**问*"我喜欢什么包管理器？"* → 直接答出 = 全链路通了。`~/.dsh/memory/MEMORY.md` 文件同时出现。在项目里保存的决策落在 `<项目根>/.dsh/memory/`——提交版本库全组共享。
+
+### 安装排障（每一行都来自真实安装实测）
+
+| 症状 | 解法 |
+|---|---|
+| `dsh: command not found` | DSH 本体没装，看前置步骤 |
+| `required option '--profile <name>'` | 参数放在子命令**前面**：`dsh plugin --profile web add ...` |
+| pnpm `ERR_P..._STORE: Unexpected store location` | 你终端的 pnpm 和 DSH 自带的（11.7.0）版本不一致——把整个 profile 目录（`~/.dsh/profiles/web`）删掉重跑 `plugin add`，全新重建即可 |
+| 装了也重启了还是没有记忆工具 | 看启动日志有没有 `warning: ... did not activate`，并跑 `dsh --profile web --dump-config \| grep fooxe` 确认条目在插件树里；warning 仍在就把日志发 issue |
+| 安装后报 `ERR_PNPM_IGNORED_BUILDS` | 对本插件无害（零原生依赖）；在 profile 目录跑 `pnpm approve-builds` 清掉即可 |
 
 ## 创新点
 

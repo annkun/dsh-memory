@@ -13,12 +13,12 @@ DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的
 前置：先装 DSH 本体——`npm install -g @deepseek-ai/dsh`（源码检出则命令加 `pnpm` 前缀）。
 
 ```sh
-dsh plugin add @fooxe/dsh-memory    # 推荐：一条命令装好并启用
-
-# 或手动（npm / pnpm 均可）：
-npm install -g @fooxe/dsh-memory   # 或 pnpm add -g @fooxe/dsh-memory
-dsh web --patch ./overlay/dsh-memory.cordis.yml
+dsh plugin --profile web add @fooxe/dsh-memory   # --profile 必填、放在 add 前
 ```
+
+装完**必须重启 DSH**（工具只在启动时注册），再开新会话说"记住我喜欢 pnpm"验证。
+
+安装遇坑（pnpm store 冲突 / --profile 报错等）见完整版 README 的排障表——每行都来自真实安装实测。
 
 ## 创新点
 
