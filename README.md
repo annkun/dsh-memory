@@ -12,7 +12,31 @@
 
 ## What it does
 
-DSH agents start every session from zero — preferences, decisions, and hard-won context evaporate between conversations. `dsh-memory` fixes that: the agent **saves what matters as it appears** (your preferences, project decisions, key numbers, lessons) and **wakes up with those memories already in context** in every future session.
+> Your DSH agent meets you for the "first time" — **every single session**.
+> With dsh-memory, it remembers.
+
+Tired of re-explaining *"I prefer pnpm"* in every project? Re-describing last week's architecture decision? `dsh-memory` gives your agent a durable memory: it **saves what matters as it appears** (preferences, project decisions, key numbers, lessons) and **every future session starts with those memories already in context**.
+
+Here's what it looks like 30 seconds after install:
+
+```text
+Session 1   You: "Remember — this project uses pnpm, not npm."
+            Agent: saved via memory_save
+
+Session 2   You: "Which package manager do we use?"
+            Agent: "pnpm — you told me yesterday."   <- no re-asking, ever
+```
+
+No server. No account. No embedding provider. Just plain markdown files — delete the directory and that scope forgets everything.
+
+### Why this one
+
+- **30-second setup** — one command, zero config, works on first boot
+- **Two scopes** — personal preferences cross-project (`~/.dsh/memory`) + team decisions committed with the repo (`<root>/.dsh/memory`; git/SVN/Hg roots auto-detected)
+- **Lazy injection, CLAUDE.md-style** — project memories are tagged by sub-directory and only load when you work in that area; your token budget goes where you work
+- **Write rules built in** — strong-evidence gate ("will this matter in a month?"), same-topic saves update in place, secrets refused on sight
+- **Bounded by design** — 25KB guarded index, 200-line cap, 500 memories per scope: memory can never silently eat your context window
+- **Zero dependencies, pure files** — nothing to provision, nothing to break
 
 ## Quick start
 
@@ -158,7 +182,31 @@ MIT. Not affiliated with DeepSeek or Anthropic.
 
 ## 这个插件做什么
 
-DSH 的 agent 每次会话都从零开始——偏好、决策、来之不易的上下文，聊完就蒸发。`dsh-memory` 解决这个问题：agent **在信息出现时自动存下重要的东西**（你的偏好、项目决策、关键数字、经验教训），并在**之后每次会话开场就带着这些记忆**。
+> 你的 DSH agent 每次开会话都是"初次见面"。
+> 装上 dsh-memory，它记得你。
+
+受够了每个项目都要重新解释一遍"我用 pnpm"？上周定的架构决策这周又要从头讲？`dsh-memory` 给 agent 装上持久记忆：信息出现时**自动存下重要的东西**（偏好、项目决策、关键数字、经验教训），**之后每次会话开场自带这些记忆**。
+
+装完 30 秒后是这个样子：
+
+```text
+会话 1   你："记住——这个项目用 pnpm，不用 npm。"
+         Agent：memory_save 已保存
+
+会话 2   你："我们用什么包管理器？"
+         Agent："pnpm——你昨天告诉我的。"   <- 从此不用重复解释
+```
+
+无服务端、无账号、无 embedding——只有纯 markdown 文件，删掉目录就是彻底遗忘。
+
+### 为什么选它
+
+- **30 秒装好**——一条命令、零配置、开箱即用
+- **双记忆域**——个人偏好跨项目通用（`~/.dsh/memory`）+ 团队决策随版本库提交共享（`<项目根>/.dsh/memory`；git/SVN/Hg 根自动检测）
+- **按需注入（CLAUDE.md 式）**——项目记忆带子目录标签，只在对应区域工作时加载，token 花在刀刃上
+- **写入规则内建**——强证据门槛（"一个月后还有用吗？"）、同主题原地更新、密钥一律拒存
+- **天生防膨胀**——25KB 索引护栏 + 200 行上限 + 每域 500 条：记忆永远不会悄悄吃掉上下文窗口
+- **零依赖纯文件**——没有要部署的、没有会坏的
 
 ## 快速开始
 
