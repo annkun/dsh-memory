@@ -193,3 +193,33 @@ test('P2 枚举：POST 写已知工作区 + 无记忆工作区被过滤', async 
   assert.ok(roots.includes(fakeWs), '已写入的假工作区应在列表')
   assert.ok(!roots.includes('/tmp/empty-ws-p2-test'), '无记忆工作区应被过滤')
 })
+
+test('P2.1 POST /delete：删除单条 → 文件消失 + 索引行移除', async () => {
+  const saved = await postSave({ scope: 'user', title: 'Delete me', content: 'Temporary memory.' })
+  assert.equal(saved.status, 200)
+  const id = saved.data.id
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/delete' && r.method === 'POST')
+  assert.ok(route, 'delete 路由应已注册')
+  const req = { async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ scope: 'user', id })) } }
+  let status = 0, resBody = ''
+  const res = { writeHead: s => { status = s }, end: s => { resBody = s } }
+  await route.handler(req, res)
+  for (let i = 0; i < 50 && resBody === ''; i++) await new Promise(r => setTimeout(r, 10))
+  assert.equal(status, 200)
+  assert.equal(JSON.parse(resBody).deleted, id)
+  const { access } = await import('node:fs/promises')
+  await assert.rejects(access(saved.data.file), '文件应已删除')
+  const index = await fs.readFile(path.join(tmp, 'MEMORY.md'), 'utf8')
+  assert.ok(!index.includes(id), '索引行应已移除')
+})
+
+test('P2.1 POST /delete：恶意 id（路径穿越）被拒', async () => {
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/delete' && r.method === 'POST')
+  const req = { async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ scope: 'user', id: '../../etc/passwd' })) } }
+  let status = 0, resBody = ''
+  const res = { writeHead: s => { status = s }, end: s => { resBody = s } }
+  await route.handler(req, res)
+  for (let i = 0; i < 50 && resBody === ''; i++) await new Promise(r => setTimeout(r, 10))
+  assert.equal(status, 400)
+  assert.match(JSON.parse(resBody).error, /invalid id/)
+})

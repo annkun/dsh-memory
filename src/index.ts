@@ -430,6 +430,52 @@ async function handlePanelSave(ctx: Context, request: IncomingMessage, response:
   }
 }
 
+/**
+ * Panel delete endpoint (P2.1): { scope, workspace?, id }. Deletes one memory
+ * file and drops its index line. The id is validated against a strict slug
+ * charset (no separators, no dots) so the browser can never traverse paths;
+ * the workspace guard mirrors the save endpoint.
+ */
+async function handlePanelDelete(ctx: Context, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const reply = (status: number, body: unknown): void => {
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify(body))
+  }
+  try {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) {
+      chunks.push(chunk as Buffer)
+      if (chunks.reduce((n, c) => n + c.length, 0) > 10_000) { reply(413, { ok: false, error: 'body too large' }); return }
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { scope?: unknown, workspace?: unknown, id?: unknown }
+    const id = String(body.id ?? '')
+    if (!/^[a-zA-Z0-9\u4e00-\u9fff_-]+$/.test(id)) { reply(400, { ok: false, error: 'invalid id' }); return }
+    let base: string | undefined
+    if (body.scope === 'user') {
+      base = scopeDir('user')
+    } else if (body.scope === 'project') {
+      if (body.workspace !== undefined) {
+        const root = path.resolve(String(body.workspace))
+        if (!(await knownWorkspaces(ctx)).includes(root)) { reply(400, { ok: false, error: 'unknown workspace' }); return }
+        base = path.join(root, '.dsh', 'memory')
+      } else {
+        base = PROJECT_DIR
+      }
+    } else {
+      reply(400, { ok: false, error: 'scope must be "user" or "project"' }); return
+    }
+    if (base === undefined) { reply(400, { ok: false, error: 'target scope unavailable' }); return }
+    const file = path.join(memoryDirOf(base), `${id}.md`)
+    if (!existsSync(file)) { reply(404, { ok: false, error: 'memory not found' }); return }
+    await fs.rm(file, { force: true })
+    const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
+    const kept = await writeIndexGuarded(base, lines)
+    reply(200, { ok: true, deleted: id, indexEntries: kept })
+  } catch (e) {
+    reply(400, { ok: false, error: String((e as Error)?.message ?? e) })
+  }
+}
+
 function excerpt(text: string, query: string, radius = 60): string {
   const at = text.toLowerCase().indexOf(query.toLowerCase())
   if (at < 0) return text.slice(0, radius * 2).trim()
@@ -793,6 +839,13 @@ export async function apply(ctx: Context): Promise<void> {
       path: '/dsh-memory/api/v1/save',
       handler: (request, response) => {
         void handlePanelSave(ctx, request, response)
+      },
+    })
+    webServer.register({
+      method: 'POST',
+      path: '/dsh-memory/api/v1/delete',
+      handler: (request, response) => {
+        void handlePanelDelete(ctx, request, response)
       },
     })
   })

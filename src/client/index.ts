@@ -1,9 +1,9 @@
 /**
- * dsh-memory client: registers the "Memory" section inside Settings — the P2
- * panel: expandable per-workspace groups, cross-scope search, and an in-panel
- * add form writing through the same save core as the model tool.
- * Built by tsdown into the __ModuleLoader__ factory bundle at client/client.js;
- * the only externals are the loader module table's react entries.
+ * dsh-memory client: registers the "Memory" section inside Settings — the P2.1
+ * panel: expandable per-workspace tree with per-scope inline add buttons,
+ * path (sub-folder) grouping inside each workspace, per-entry delete, and a
+ * scrollable list. All writes go through the same save/delete cores as the
+ * model tools.
  */
 import { createElement as h, useState, useEffect, useCallback } from 'react'
 import type { ChangeEvent, FormEvent, ReactElement } from 'react'
@@ -39,23 +39,31 @@ interface WorkspaceInfo {
 
 interface PanelData { scopes: { user?: ScopeInfo, projects?: WorkspaceInfo[] } }
 
+interface SaveTarget { scope: 'user' | 'project', workspace?: string }
+
 const S: Record<string, Partial<CSSStyleDeclaration>> = {
   pad: { padding: '16px', fontFamily: 'inherit' },
   h2: { margin: '0 0 12px' },
   toolbar: { display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' },
-  section: { marginBottom: '20px' },
+  section: { marginBottom: '16px' },
   muted: { color: 'var(--fg-muted, #888)', fontSize: '12px' },
   input: { padding: '6px 10px', boxSizing: 'border-box', fontFamily: 'inherit' },
   search: { width: '100%', maxWidth: '420px', padding: '6px 10px', boxSizing: 'border-box', fontFamily: 'inherit' },
   textarea: { width: '100%', padding: '6px 10px', boxSizing: 'border-box', fontFamily: 'inherit' },
-  button: { padding: '6px 14px', fontFamily: 'inherit', cursor: 'pointer' },
-  form: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', maxWidth: '560px' },
+  button: { padding: '4px 10px', fontFamily: 'inherit', cursor: 'pointer' },
+  smallButton: { padding: '2px 8px', fontFamily: 'inherit', fontSize: '12px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border, #e5e5e5)', borderRadius: '4px' },
+  form: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px', maxWidth: '560px' },
   list: { listStyle: 'none', margin: '0', padding: '0' },
-  item: { padding: '8px 0', borderBottom: '1px solid var(--border, #e5e5e5)' },
+  item: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px', padding: '8px 0', borderBottom: '1px solid var(--border, #e5e5e5)' },
+  itemMain: { minWidth: '0' },
   tag: { margin: '0 4px', padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-muted, #f2f2f2)', fontSize: '11px' },
   wsHeader: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '6px 0', userSelect: 'none' },
+  wsHeaderMain: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1', minWidth: '0' },
   chevron: { display: 'inline-block', width: '1em', transition: 'transform 120ms' },
   current: { margin: '0', padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-accent, #e0ecff)', fontSize: '11px' },
+  pathGroup: { marginLeft: '18px', borderLeft: '1px solid var(--border, #e5e5e5)', paddingLeft: '10px', marginTop: '4px' },
+  pathHeader: { color: 'var(--fg-muted, #888)', fontSize: '12px', padding: '4px 0' },
+  scroller: { maxHeight: '60vh', overflowY: 'auto', paddingRight: '8px' },
   error: { color: 'var(--fg-danger, #c33)', fontSize: '13px' },
 }
 
@@ -82,12 +90,15 @@ function entryMatches(e: PanelEntry, q: string): boolean {
     || e.tags.some(t => t.toLowerCase().includes(q))
 }
 
+function gauge(stats: ScopeStats): string {
+  return `${stats.entries}/${stats.maxEntries} lines · ${(stats.indexBytes / 1024).toFixed(1)}/${(stats.maxBytes / 1024).toFixed(0)} KB · ${stats.memoryFiles}/${stats.maxMemories} files`
+}
+
 function MemoryPanel(): ReactElement {
   const [data, setData] = useState<PanelData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [adding, setAdding] = useState(false)
   const [defaultExpanded, setDefaultExpanded] = useState(false)
 
   const fetchList = useCallback(() => {
@@ -121,75 +132,132 @@ function MemoryPanel(): ReactElement {
         value: query,
         onChange: (e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value),
       }),
-      h('button', { style: S.button, onClick: () => setAdding(!adding) }, adding ? '× Cancel' : '+ Add'),
     ),
-    adding ? h(AddForm, {
-      workspaces,
-      onDone: () => { setAdding(false); fetchList() },
-    }) : null,
-    h(UserSection, { info: data.scopes.user, query: q }),
-    workspaces.length > 0
-      ? h('h3', { style: { margin: '16px 0 4px' } }, 'Projects')
-      : null,
-    workspaces.map(ws => h(WorkspaceSection, {
-      key: ws.root,
-      ws,
-      query: q,
-      forceOpen: searchActive,
-      open: searchActive || expanded.has(ws.root),
-      onToggle: () => {
-        const next = new Set(expanded)
-        if (next.has(ws.root)) next.delete(ws.root)
-        else next.add(ws.root)
-        setExpanded(next)
-      },
-    })),
+    h('div', { style: S.scroller },
+      h(UserSection, {
+        info: data.scopes.user, query: q,
+        onSaved: fetchList,
+      }),
+      workspaces.length > 0 ? h('h3', { style: { margin: '8px 0 4px' } }, 'Projects') : null,
+      workspaces.map(ws => h(WorkspaceSection, {
+        key: ws.root,
+        ws,
+        query: q,
+        open: searchActive || expanded.has(ws.root),
+        onToggle: () => {
+          const next = new Set(expanded)
+          if (next.has(ws.root)) next.delete(ws.root)
+          else next.add(ws.root)
+          setExpanded(next)
+        },
+        onSaved: fetchList,
+      })),
+    ),
   )
 }
 
-function gauge(stats: ScopeStats): string {
-  return `${stats.entries}/${stats.maxEntries} lines · ${(stats.indexBytes / 1024).toFixed(1)}/${(stats.maxBytes / 1024).toFixed(0)} KB · ${stats.memoryFiles}/${stats.maxMemories} files`
+/** Entries grouped by sub-folder path: root-level first, then path groups. */
+function GroupedEntries(props: { entries: PanelEntry[], query: string, emptyText: string, target: SaveTarget, onSaved: () => void }): ReactElement {
+  const { entries, query, target, onSaved } = props
+  const q = query
+  const matched = q === '' ? entries : entries.filter(e => entryMatches(e, q))
+  const root = matched.filter(e => e.path === '')
+  const groups = new Map<string, PanelEntry[]>()
+  for (const e of matched) {
+    if (e.path === '') continue
+    const list = groups.get(e.path) ?? []
+    list.push(e)
+    groups.set(e.path, list)
+  }
+  if (matched.length === 0) return h('p', { style: S.muted }, q === '' ? props.emptyText : 'No memories match the search.')
+  return h('div', null,
+    h(EntryList, { entries: root, query: '', target, onSaved }),
+    [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([p, es]) =>
+      h('div', { key: p, style: S.pathGroup },
+        h('div', { style: S.pathHeader }, '📁 ', p, ` · ${es.length}`),
+        h(EntryList, { entries: es, query: '', target, onSaved }),
+      )),
+  )
 }
 
-function EntryList(props: { entries: PanelEntry[], query: string, emptyText: string }): ReactElement {
-  const q = props.query
-  const entries = q === '' ? props.entries : props.entries.filter(e => entryMatches(e, q))
-  if (entries.length === 0) return h('p', { style: S.muted }, q === '' ? props.emptyText : 'No memories match the search.')
-  return h('ul', { style: S.list }, entries.map((e, i) => h('li', { key: e.id ?? i, style: S.item },
-    h('div', null,
-      h('strong', null, e.title),
-      e.path !== '' ? h('code', { key: 'path', style: S.tag }, e.path) : null,
-      ...e.tags.map(t => h('code', { key: t, style: S.tag }, t))),
-    h('div', { style: S.muted }, e.date !== '' ? `${e.date} — ` : '', e.excerpt),
+function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTarget, onSaved: () => void }): ReactElement {
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const del = (e: PanelEntry): void => {
+    if (deleting !== null || e.id === undefined) return
+    if (!window.confirm(`Delete "${e.title}"?`)) return
+    setDeleting(e.id)
+    fetch('/dsh-memory/api/v1/delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: props.target.scope, workspace: props.target.workspace, id: e.id }),
+    })
+      .then(async r => {
+        const d = r.json() as Promise<{ ok?: boolean, error?: string }>
+        if (!r.ok || (await d).ok !== true) throw new Error((await d as { error?: string }).error ?? `HTTP ${r.status}`)
+        props.onSaved()
+      })
+      .catch(() => { /* keep the entry; user can retry */ })
+      .finally(() => { setDeleting(null) })
+  }
+  if (props.entries.length === 0) return h('span')
+  return h('ul', { style: S.list }, props.entries.map((e, i) => h('li', { key: e.id ?? i, style: S.item },
+    h('div', { style: S.itemMain },
+      h('div', null,
+        h('strong', null, e.title),
+        e.tags.map(t => h('code', { key: t, style: S.tag }, t))),
+      h('div', { style: S.muted }, e.date !== '' ? `${e.date} — ` : '', e.excerpt),
+    ),
+    e.id !== undefined
+      ? h('button', {
+          style: S.smallButton, title: 'Delete this memory',
+          disabled: deleting === e.id,
+          onClick: () => del(e),
+        }, deleting === e.id ? '…' : '×')
+      : null,
   )))
 }
 
-function UserSection(props: { info: ScopeInfo | undefined, query: string }): ReactElement {
+function UserSection(props: { info: ScopeInfo | undefined, query: string, onSaved: () => void }): ReactElement {
+  const [adding, setAdding] = useState(false)
   const { info, query } = props
-  if (info?.available !== true) return h('section', { style: S.section },
-    h('h3', null, 'User'), h('p', { style: S.muted }, 'Not available in this workspace'))
+  const target: SaveTarget = { scope: 'user' }
   return h('section', { style: S.section },
-    h('h3', null, 'User ', h('span', { style: S.muted }, gauge(info.stats!))),
-    h('p', { style: { ...S.muted, margin: '0 0 4px' } }, 'Personal, cross-project'),
-    h(EntryList, { entries: info.entries ?? [], query, emptyText: 'No memories yet.' }),
-  )
-}
-
-function WorkspaceSection(props: { ws: WorkspaceInfo, query: string, open: boolean, forceOpen: boolean, onToggle: () => void }): ReactElement {
-  const { ws, open, onToggle } = props
-  return h('section', { style: S.section },
-    h('div', { style: S.wsHeader, onClick: props.forceOpen ? undefined : onToggle },
-      h('span', { style: { ...S.chevron, transform: open ? 'rotate(90deg)' : 'rotate(0deg)' } }, '▸'),
-      h('strong', null, ws.name),
-      ws.current ? h('code', { style: S.current }, 'current') : null,
-      h('span', { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`),
+    h('div', { style: S.wsHeader },
+      h('span', { style: { ...S.chevron, transform: 'rotate(90deg)' } }, '▸'),
+      h('strong', null, 'User'),
+      h('span', { style: S.muted }, info?.available === true ? gauge(info.stats!) : ''),
+      h('span', { style: { flex: '1' } }),
+      h('button', { style: S.smallButton, title: 'Add a user memory', onClick: () => setAdding(!adding) }, adding ? '×' : '+'),
     ),
-    open ? h(EntryList, { entries: ws.entries, query: props.query, emptyText: 'No memories in this workspace.' }) : null,
+    adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
+    info?.available !== true
+      ? h('p', { style: S.muted }, 'Not available in this workspace')
+      : h(GroupedEntries, { entries: info.entries ?? [], query, emptyText: 'No memories yet.', target, onSaved: props.onSaved }),
   )
 }
 
-function AddForm(props: { workspaces: WorkspaceInfo[], onDone: () => void }): ReactElement {
-  const [scope, setScope] = useState<string>(props.workspaces.find(w => w.current)?.root ?? 'user')
+function WorkspaceSection(props: { ws: WorkspaceInfo, query: string, open: boolean, onToggle: () => void, onSaved: () => void }): ReactElement {
+  const [adding, setAdding] = useState(false)
+  const { ws, open, onToggle } = props
+  const target: SaveTarget = { scope: 'project', workspace: ws.root }
+  return h('section', { style: S.section },
+    h('div', { style: S.wsHeader },
+      h('div', { style: S.wsHeaderMain, onClick: onToggle },
+        h('span', { style: { ...S.chevron, transform: open ? 'rotate(90deg)' : 'rotate(0deg)' } }, '▸'),
+        h('strong', null, ws.name),
+        ws.current ? h('code', { style: S.current }, 'current') : null,
+        h('span', { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`),
+      ),
+      h('button', { style: S.smallButton, title: `Add a memory in ${ws.name}`, onClick: () => setAdding(!adding) }, adding ? '×' : '+'),
+    ),
+    open ? h('div', null,
+      adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
+      h(GroupedEntries, { entries: ws.entries, query: props.query, emptyText: 'No memories in this workspace.', target, onSaved: props.onSaved }),
+    ) : null,
+  )
+}
+
+function AddForm(props: { target: SaveTarget, onDone: () => void }): ReactElement {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [tags, setTags] = useState('')
@@ -201,16 +269,15 @@ function AddForm(props: { workspaces: WorkspaceInfo[], onDone: () => void }): Re
     if (saving) return
     setSaving(true)
     setFormError(null)
-    const body = {
-      scope: scope === 'user' ? 'user' : 'project',
-      workspace: scope === 'user' ? undefined : scope,
-      title, content,
-      tags: tags.split(',').map(t => t.trim()).filter(t => t !== ''),
-    }
     fetch('/dsh-memory/api/v1/save', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        scope: props.target.scope,
+        workspace: props.target.workspace,
+        title, content,
+        tags: tags.split(',').map(t => t.trim()).filter(t => t !== ''),
+      }),
     })
       .then(async r => {
         const data = r.json() as Promise<{ ok?: boolean, error?: string }>
@@ -221,14 +288,7 @@ function AddForm(props: { workspaces: WorkspaceInfo[], onDone: () => void }): Re
   }
 
   return h('form', { style: S.form, onSubmit: submit },
-    h('select', {
-      style: S.input, value: scope,
-      onChange: (e: ChangeEvent<HTMLSelectElement>) => setScope(e.target.value),
-    },
-      h('option', { key: 'user', value: 'user' }, 'User — personal, cross-project'),
-      ...props.workspaces.map(w => h('option', { key: w.root, value: w.root }, `${w.name}${w.current ? ' (current)' : ''} — team-shared`)),
-    ),
-    h('input', { style: S.input, placeholder: 'Title (max 60 chars)', value: title, maxLength: 60, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
+    h('input', { style: S.input, placeholder: 'Title (max 60 chars)', value: title, maxLength: 60, autoFocus: true, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
     h('textarea', { style: S.textarea, placeholder: 'The memory itself — self-contained, will matter months later', value: content, rows: 4, onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value) }),
     h('input', { style: S.input, placeholder: 'Tags, comma-separated (optional)', value: tags, onChange: (e: ChangeEvent<HTMLInputElement>) => setTags(e.target.value) }),
     formError !== null ? h('div', { style: S.error }, formError) : null,

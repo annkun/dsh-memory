@@ -7,11 +7,11 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		//#region src/client/index.ts
 		/**
-		* dsh-memory client: registers the "Memory" section inside Settings — the P2
-		* panel: expandable per-workspace groups, cross-scope search, and an in-panel
-		* add form writing through the same save core as the model tool.
-		* Built by tsdown into the __ModuleLoader__ factory bundle at client/client.js;
-		* the only externals are the loader module table's react entries.
+		* dsh-memory client: registers the "Memory" section inside Settings — the P2.1
+		* panel: expandable per-workspace tree with per-scope inline add buttons,
+		* path (sub-folder) grouping inside each workspace, per-entry delete, and a
+		* scrollable list. All writes go through the same save/delete cores as the
+		* model tools.
 		*/
 		const S = {
 			pad: {
@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
 				marginBottom: "12px",
 				alignItems: "center"
 			},
-			section: { marginBottom: "20px" },
+			section: { marginBottom: "16px" },
 			muted: {
 				color: "var(--fg-muted, #888)",
 				fontSize: "12px"
@@ -49,15 +49,24 @@ window.__ModuleLoader__.load({
 				fontFamily: "inherit"
 			},
 			button: {
-				padding: "6px 14px",
+				padding: "4px 10px",
 				fontFamily: "inherit",
 				cursor: "pointer"
+			},
+			smallButton: {
+				padding: "2px 8px",
+				fontFamily: "inherit",
+				fontSize: "12px",
+				cursor: "pointer",
+				background: "transparent",
+				border: "1px solid var(--border, #e5e5e5)",
+				borderRadius: "4px"
 			},
 			form: {
 				display: "flex",
 				flexDirection: "column",
 				gap: "8px",
-				marginBottom: "16px",
+				marginBottom: "12px",
 				maxWidth: "560px"
 			},
 			list: {
@@ -66,9 +75,14 @@ window.__ModuleLoader__.load({
 				padding: "0"
 			},
 			item: {
+				display: "flex",
+				alignItems: "baseline",
+				justifyContent: "space-between",
+				gap: "8px",
 				padding: "8px 0",
 				borderBottom: "1px solid var(--border, #e5e5e5)"
 			},
+			itemMain: { minWidth: "0" },
 			tag: {
 				margin: "0 4px",
 				padding: "1px 6px",
@@ -84,6 +98,13 @@ window.__ModuleLoader__.load({
 				padding: "6px 0",
 				userSelect: "none"
 			},
+			wsHeaderMain: {
+				display: "flex",
+				alignItems: "center",
+				gap: "8px",
+				flex: "1",
+				minWidth: "0"
+			},
 			chevron: {
 				display: "inline-block",
 				width: "1em",
@@ -95,6 +116,22 @@ window.__ModuleLoader__.load({
 				borderRadius: "4px",
 				background: "var(--bg-accent, #e0ecff)",
 				fontSize: "11px"
+			},
+			pathGroup: {
+				marginLeft: "18px",
+				borderLeft: "1px solid var(--border, #e5e5e5)",
+				paddingLeft: "10px",
+				marginTop: "4px"
+			},
+			pathHeader: {
+				color: "var(--fg-muted, #888)",
+				fontSize: "12px",
+				padding: "4px 0"
+			},
+			scroller: {
+				maxHeight: "60vh",
+				overflowY: "auto",
+				paddingRight: "8px"
 			},
 			error: {
 				color: "var(--fg-danger, #c33)",
@@ -115,12 +152,14 @@ window.__ModuleLoader__.load({
 		function entryMatches(e, q) {
 			return e.title.toLowerCase().includes(q) || e.excerpt.toLowerCase().includes(q) || e.path.toLowerCase().includes(q) || e.tags.some((t) => t.toLowerCase().includes(q));
 		}
+		function gauge(stats) {
+			return `${stats.entries}/${stats.maxEntries} lines · ${(stats.indexBytes / 1024).toFixed(1)}/${(stats.maxBytes / 1024).toFixed(0)} KB · ${stats.memoryFiles}/${stats.maxMemories} files`;
+		}
 		function MemoryPanel() {
 			const [data, setData] = (0, react.useState)(null);
 			const [error, setError] = (0, react.useState)(null);
 			const [query, setQuery] = (0, react.useState)("");
 			const [expanded, setExpanded] = (0, react.useState)(/* @__PURE__ */ new Set());
-			const [adding, setAdding] = (0, react.useState)(false);
 			const [defaultExpanded, setDefaultExpanded] = (0, react.useState)(false);
 			const fetchList = (0, react.useCallback)(() => {
 				fetch("/dsh-memory/api/v1/list").then((r) => {
@@ -148,78 +187,146 @@ window.__ModuleLoader__.load({
 				placeholder: "Search memories…",
 				value: query,
 				onChange: (e) => setQuery(e.target.value)
-			}), (0, react.createElement)("button", {
-				style: S.button,
-				onClick: () => setAdding(!adding)
-			}, adding ? "× Cancel" : "+ Add")), adding ? (0, react.createElement)(AddForm, {
-				workspaces,
-				onDone: () => {
-					setAdding(false);
-					fetchList();
-				}
-			}) : null, (0, react.createElement)(UserSection, {
+			})), (0, react.createElement)("div", { style: S.scroller }, (0, react.createElement)(UserSection, {
 				info: data.scopes.user,
-				query: q
-			}), workspaces.length > 0 ? (0, react.createElement)("h3", { style: { margin: "16px 0 4px" } }, "Projects") : null, workspaces.map((ws) => (0, react.createElement)(WorkspaceSection, {
+				query: q,
+				onSaved: fetchList
+			}), workspaces.length > 0 ? (0, react.createElement)("h3", { style: { margin: "8px 0 4px" } }, "Projects") : null, workspaces.map((ws) => (0, react.createElement)(WorkspaceSection, {
 				key: ws.root,
 				ws,
 				query: q,
-				forceOpen: searchActive,
 				open: searchActive || expanded.has(ws.root),
 				onToggle: () => {
 					const next = new Set(expanded);
 					if (next.has(ws.root)) next.delete(ws.root);
 					else next.add(ws.root);
 					setExpanded(next);
-				}
-			})));
+				},
+				onSaved: fetchList
+			}))));
 		}
-		function gauge(stats) {
-			return `${stats.entries}/${stats.maxEntries} lines · ${(stats.indexBytes / 1024).toFixed(1)}/${(stats.maxBytes / 1024).toFixed(0)} KB · ${stats.memoryFiles}/${stats.maxMemories} files`;
+		/** Entries grouped by sub-folder path: root-level first, then path groups. */
+		function GroupedEntries(props) {
+			const { entries, query, target, onSaved } = props;
+			const q = query;
+			const matched = q === "" ? entries : entries.filter((e) => entryMatches(e, q));
+			const root = matched.filter((e) => e.path === "");
+			const groups = /* @__PURE__ */ new Map();
+			for (const e of matched) {
+				if (e.path === "") continue;
+				const list = groups.get(e.path) ?? [];
+				list.push(e);
+				groups.set(e.path, list);
+			}
+			if (matched.length === 0) return (0, react.createElement)("p", { style: S.muted }, q === "" ? props.emptyText : "No memories match the search.");
+			return (0, react.createElement)("div", null, (0, react.createElement)(EntryList, {
+				entries: root,
+				query: "",
+				target,
+				onSaved
+			}), [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([p, es]) => (0, react.createElement)("div", {
+				key: p,
+				style: S.pathGroup
+			}, (0, react.createElement)("div", { style: S.pathHeader }, "📁 ", p, ` · ${es.length}`), (0, react.createElement)(EntryList, {
+				entries: es,
+				query: "",
+				target,
+				onSaved
+			}))));
 		}
 		function EntryList(props) {
-			const q = props.query;
-			const entries = q === "" ? props.entries : props.entries.filter((e) => entryMatches(e, q));
-			if (entries.length === 0) return (0, react.createElement)("p", { style: S.muted }, q === "" ? props.emptyText : "No memories match the search.");
-			return (0, react.createElement)("ul", { style: S.list }, entries.map((e, i) => (0, react.createElement)("li", {
+			const [deleting, setDeleting] = (0, react.useState)(null);
+			const del = (e) => {
+				if (deleting !== null || e.id === void 0) return;
+				if (!window.confirm(`Delete "${e.title}"?`)) return;
+				setDeleting(e.id);
+				fetch("/dsh-memory/api/v1/delete", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						scope: props.target.scope,
+						workspace: props.target.workspace,
+						id: e.id
+					})
+				}).then(async (r) => {
+					const d = r.json();
+					if (!r.ok || (await d).ok !== true) throw new Error((await d).error ?? `HTTP ${r.status}`);
+					props.onSaved();
+				}).catch(() => {}).finally(() => {
+					setDeleting(null);
+				});
+			};
+			if (props.entries.length === 0) return (0, react.createElement)("span");
+			return (0, react.createElement)("ul", { style: S.list }, props.entries.map((e, i) => (0, react.createElement)("li", {
 				key: e.id ?? i,
 				style: S.item
-			}, (0, react.createElement)("div", null, (0, react.createElement)("strong", null, e.title), e.path !== "" ? (0, react.createElement)("code", {
-				key: "path",
-				style: S.tag
-			}, e.path) : null, ...e.tags.map((t) => (0, react.createElement)("code", {
+			}, (0, react.createElement)("div", { style: S.itemMain }, (0, react.createElement)("div", null, (0, react.createElement)("strong", null, e.title), e.tags.map((t) => (0, react.createElement)("code", {
 				key: t,
 				style: S.tag
-			}, t))), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt))));
+			}, t))), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt)), e.id !== void 0 ? (0, react.createElement)("button", {
+				style: S.smallButton,
+				title: "Delete this memory",
+				disabled: deleting === e.id,
+				onClick: () => del(e)
+			}, deleting === e.id ? "…" : "×") : null)));
 		}
 		function UserSection(props) {
+			const [adding, setAdding] = (0, react.useState)(false);
 			const { info, query } = props;
-			if (info?.available !== true) return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("h3", null, "User"), (0, react.createElement)("p", { style: S.muted }, "Not available in this workspace"));
-			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("h3", null, "User ", (0, react.createElement)("span", { style: S.muted }, gauge(info.stats))), (0, react.createElement)("p", { style: {
-				...S.muted,
-				margin: "0 0 4px"
-			} }, "Personal, cross-project"), (0, react.createElement)(EntryList, {
+			const target = { scope: "user" };
+			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("div", { style: S.wsHeader }, (0, react.createElement)("span", { style: {
+				...S.chevron,
+				transform: "rotate(90deg)"
+			} }, "▸"), (0, react.createElement)("strong", null, "User"), (0, react.createElement)("span", { style: S.muted }, info?.available === true ? gauge(info.stats) : ""), (0, react.createElement)("span", { style: { flex: "1" } }), (0, react.createElement)("button", {
+				style: S.smallButton,
+				title: "Add a user memory",
+				onClick: () => setAdding(!adding)
+			}, adding ? "×" : "+")), adding ? (0, react.createElement)(AddForm, {
+				target,
+				onDone: () => {
+					setAdding(false);
+					props.onSaved();
+				}
+			}) : null, info?.available !== true ? (0, react.createElement)("p", { style: S.muted }, "Not available in this workspace") : (0, react.createElement)(GroupedEntries, {
 				entries: info.entries ?? [],
 				query,
-				emptyText: "No memories yet."
+				emptyText: "No memories yet.",
+				target,
+				onSaved: props.onSaved
 			}));
 		}
 		function WorkspaceSection(props) {
+			const [adding, setAdding] = (0, react.useState)(false);
 			const { ws, open, onToggle } = props;
-			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("div", {
-				style: S.wsHeader,
-				onClick: props.forceOpen ? void 0 : onToggle
+			const target = {
+				scope: "project",
+				workspace: ws.root
+			};
+			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("div", { style: S.wsHeader }, (0, react.createElement)("div", {
+				style: S.wsHeaderMain,
+				onClick: onToggle
 			}, (0, react.createElement)("span", { style: {
 				...S.chevron,
 				transform: open ? "rotate(90deg)" : "rotate(0deg)"
-			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.current ? (0, react.createElement)("code", { style: S.current }, "current") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), open ? (0, react.createElement)(EntryList, {
+			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.current ? (0, react.createElement)("code", { style: S.current }, "current") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), (0, react.createElement)("button", {
+				style: S.smallButton,
+				title: `Add a memory in ${ws.name}`,
+				onClick: () => setAdding(!adding)
+			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(AddForm, {
+				target,
+				onDone: () => {
+					setAdding(false);
+					props.onSaved();
+				}
+			}) : null, (0, react.createElement)(GroupedEntries, {
 				entries: ws.entries,
 				query: props.query,
-				emptyText: "No memories in this workspace."
-			}) : null);
+				emptyText: "No memories in this workspace.",
+				target,
+				onSaved: props.onSaved
+			})) : null);
 		}
 		function AddForm(props) {
-			const [scope, setScope] = (0, react.useState)(props.workspaces.find((w) => w.current)?.root ?? "user");
 			const [title, setTitle] = (0, react.useState)("");
 			const [content, setContent] = (0, react.useState)("");
 			const [tags, setTags] = (0, react.useState)("");
@@ -230,17 +337,16 @@ window.__ModuleLoader__.load({
 				if (saving) return;
 				setSaving(true);
 				setFormError(null);
-				const body = {
-					scope: scope === "user" ? "user" : "project",
-					workspace: scope === "user" ? void 0 : scope,
-					title,
-					content,
-					tags: tags.split(",").map((t) => t.trim()).filter((t) => t !== "")
-				};
 				fetch("/dsh-memory/api/v1/save", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify(body)
+					body: JSON.stringify({
+						scope: props.target.scope,
+						workspace: props.target.workspace,
+						title,
+						content,
+						tags: tags.split(",").map((t) => t.trim()).filter((t) => t !== "")
+					})
 				}).then(async (r) => {
 					const data = r.json();
 					if (!r.ok || (await data).ok !== true) throw new Error((await data).error ?? `HTTP ${r.status}`);
@@ -253,21 +359,12 @@ window.__ModuleLoader__.load({
 			return (0, react.createElement)("form", {
 				style: S.form,
 				onSubmit: submit
-			}, (0, react.createElement)("select", {
-				style: S.input,
-				value: scope,
-				onChange: (e) => setScope(e.target.value)
-			}, (0, react.createElement)("option", {
-				key: "user",
-				value: "user"
-			}, "User — personal, cross-project"), ...props.workspaces.map((w) => (0, react.createElement)("option", {
-				key: w.root,
-				value: w.root
-			}, `${w.name}${w.current ? " (current)" : ""} — team-shared`))), (0, react.createElement)("input", {
+			}, (0, react.createElement)("input", {
 				style: S.input,
 				placeholder: "Title (max 60 chars)",
 				value: title,
 				maxLength: 60,
+				autoFocus: true,
 				onChange: (e) => setTitle(e.target.value)
 			}), (0, react.createElement)("textarea", {
 				style: S.textarea,
