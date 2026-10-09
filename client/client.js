@@ -54,8 +54,8 @@ window.__ModuleLoader__.load({
 		const name = "@fooxe/dsh-memory";
 		const inject = ["slots"];
 		function apply(ctx) {
-			ctx.slots.inject("settings.plugins.tab", () => ctx.slots.register({
-				name: "settings.plugins.tab",
+			ctx.slots.inject("settings.section", () => ctx.slots.register({
+				name: "settings.section",
 				id: "dsh-memory",
 				order: 70,
 				label: () => "Memory",

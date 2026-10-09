@@ -55,11 +55,12 @@ export const name = '@fooxe/dsh-memory'
 export const inject = ['slots']
 
 export function apply(ctx: ClientSlotContext): void {
-  // The Plugins settings section's tab slot: "one page inside the Plugins
-  // settings section", rendered as a tab beside the host's own. A host that
-  // does not declare this slot never runs this registration (clean downgrade).
-  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-    name: 'settings.plugins.tab',
+  // The settings shell's per-feature page slot (ui-settings contract):
+  // one nav entry + one panel page per registration. Options carry the nav
+  // identity (id / order / label thunk); a host without this slot never runs
+  // the registration (clean downgrade).
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
     id: 'dsh-memory',
     order: 70,
     label: () => 'Memory',
