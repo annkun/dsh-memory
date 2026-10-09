@@ -17,6 +17,7 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
@@ -27,6 +28,7 @@
     "cordis.patch.yml",
     "lib/index.js",
     "lib/types/**/*.d.ts",
+    "client/client.js",
     "overlay/dsh-memory.cordis.yml"
   ],
   "keywords": [
@@ -54,11 +56,15 @@
     "@deepseek-ai/dsh-code-runtime": "0.0.1-rc.1",
     "@deepseek-ai/dsh-timeout": "0.0.1-rc.1",
     "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.22.14",
+    "react": "^18.3.1",
+    "@types/react": "^18.3.12"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "node --test tests/basic.test.mjs tests/smoke.plugin.mjs tests/detection.test.mjs tests/pathedge.test.mjs tests/atomic.test.mjs"
+    "build": "tsc -p tsconfig.json && npm run build:client",
+    "test": "node --test tests/basic.test.mjs tests/smoke.plugin.mjs tests/detection.test.mjs tests/pathedge.test.mjs tests/atomic.test.mjs",
+    "build:client": "tsdown"
   },
   "engines": {
     "node": ">=22.19"
@@ -74,6 +80,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "test": "node --test tests/basic.test.mjs tests/smoke.plugin.mjs tests/detection.test.mjs tests/pathedge.test.mjs"
