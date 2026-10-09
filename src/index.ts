@@ -32,7 +32,8 @@
  * @module dsh-memory
  */
 
-import { promises as fs, existsSync, readFileSync } from 'node:fs'
+import { promises as fs, existsSync, readFileSync, statSync, readdirSync } from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import os from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
@@ -273,6 +274,49 @@ const SAVE_DESCRIPTION = [
 ].join(' ')
 
 const SEARCH_DESCRIPTION = 'Search saved memories by keyword (case-insensitive substring match across titles, tags, and content). Call this when prior context, user preferences, or earlier decisions may be relevant to the current task — before re-asking the user.'
+
+/** Narrow structural type for the host webServer route service (P1 panel data bridge). */
+interface WebServerRouteService {
+  register(route: { method: string, path: string, handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void> }): () => void
+}
+
+/** Parse one index line into a panel entry (tolerant: unparseable lines degrade, never throw). */
+function parseEntryLine(line: string): Record<string, unknown> {
+  const m = /^- \[([^\]]*)\]\(memories\/([^)]+)\) — (.*)$/.exec(line)
+  if (m === null) return { title: line.slice(2, 62), date: '', path: '', tags: [], excerpt: '' }
+  const rest = m[3]!
+  const dateM = /\((\d{4}-\d{2}-\d{2})\)/.exec(rest)
+  const pathM = /\) \[([^\]]+)\]/.exec(rest)
+  const tags = [...rest.matchAll(/`([^`]+)`/g)].map(t => t[1]!)
+  const excerpt = rest.split(' (')[0]!.slice(0, 100)
+  return { id: m[2], title: m[1]!, date: dateM?.[1] ?? '', path: pathM?.[1] ?? '', tags, excerpt }
+}
+
+/** Assemble the read-only panel payload for both scopes (P1 visual editor data bridge). */
+function buildPanelPayload(): Record<string, unknown> {
+  const scopes: Record<string, unknown> = {}
+  for (const scope of activeScopes()) {
+    const base = scopeDir(scope)
+    if (base === undefined) { scopes[scope] = { available: false }; continue }
+    let lines: string[] = []
+    try { lines = parseIndexLines(readFileSync(indexFileOf(base), 'utf8'), base) } catch { lines = [] } // orphan-filtered, sync (panel snapshot)
+    let indexBytes = 0
+    try { indexBytes = statSync(indexFileOf(base)).size } catch { indexBytes = 0 }
+    const memDir = memoryDirOf(base)
+    let memoryCount = 0
+    try { memoryCount = readdirSync(memDir).filter(f => f.endsWith('.md')).length } catch { memoryCount = 0 }
+    scopes[scope] = {
+      available: true,
+      stats: {
+        entries: lines.length, maxEntries: MAX_INDEX_LINES,
+        indexBytes, maxBytes: MAX_INDEX_BYTES,
+        memoryFiles: memoryCount, maxMemories: MAX_MEMORIES,
+      },
+      entries: lines.map(parseEntryLine),
+    }
+  }
+  return { scopes }
+}
 
 function simpleError(code: string, message: string): { code: string, message: string } {
   return { code, message }
@@ -566,4 +610,21 @@ export async function apply(ctx: Context): Promise<void> {
     },
     presentCall: () => ({ card: 'generic' as const, title: 'List memories (both scopes)' }),
   }))
+
+  // P1 visual editor data bridge: a read-only JSON API served by the host
+  // webServer. Runtime-injected (NOT a top-level inject) so hosts without a
+  // web server keep every tool working — the panel just has no data source.
+  if (typeof ctx.inject !== 'function') return // minimal hosts/test stubs without runtime inject: tools keep working, panel has no data source
+  ctx.inject(['webServer'], (webCtx: Context) => {
+    const webServer = (webCtx as unknown as { webServer?: WebServerRouteService }).webServer
+    if (webServer === undefined) return
+    webServer.register({
+      method: 'GET',
+      path: '/dsh-memory/api/v1/list',
+      handler: (_request, response) => {
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+        response.end(JSON.stringify(buildPanelPayload()))
+      },
+    })
+  })
 }

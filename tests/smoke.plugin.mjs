@@ -14,11 +14,15 @@ const plugin = await import('../lib/index.js')
 
 const registered = []
 const sections = []
+const webRoutes = []
 const ctx = {
   tools: { register: t => registered.push(t) },
   systemPrompt: {
     section: s => sections.push(s),
     getSectionOrder: k => 42,
+  },
+  inject: (names, cb) => {
+    if (names.includes('webServer')) cb({ webServer: { register: r => { webRoutes.push(r); return () => {} } } })
   },
 }
 plugin.apply(ctx)
@@ -125,4 +129,21 @@ test('v0.7 工作目录进入子目录后该区域记忆注入', async () => {
   } finally {
     process.chdir(tmp)
   }
+})
+
+test('P1 数据桥：GET /dsh-memory/api/v1/list 返回双域 JSON', async () => {
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/list')
+  assert.ok(route, '路由应已注册')
+  assert.equal(route.method, 'GET')
+  let body = ''
+  const res = { writeHead: () => {}, end: s => { body = s } }
+  await route.handler({}, res)
+  const data = JSON.parse(body)
+  assert.ok(data.scopes && typeof data.scopes.user === 'object', '应有 user 域')
+  assert.ok(data.scopes.project, '应有 project 域')
+  const p = data.scopes.project
+  assert.ok(p.available === true && Array.isArray(p.entries) && p.entries.length >= 1, 'project 域应有已存记忆')
+  assert.ok(typeof p.stats.indexBytes === 'number' && p.stats.maxBytes === 25600, '护栏统计应含字节数')
+  const entry = p.entries[0]
+  assert.ok(entry.title && entry.date, '条目应解析出 title/date')
 })
