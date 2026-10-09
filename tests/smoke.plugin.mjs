@@ -320,3 +320,39 @@ test('v0.11 会话级注入：path 标签按会话 cwd 过滤', () => {
   assert.ok(!outside.includes('] — api only'), '他区标签记忆不应注入正文')
   assert.ok(outside.includes('memory_search surfaces them'), '应提示其他区域记忆可搜')
 })
+
+test('v0.11.1 写侧会话级：exec.agent 携带会话 → 默认存进该工作区 + path 标签按会话', async () => {
+  const fakeWs = path.join(tmp, 'write-session-ws')
+  mkdirSync(path.join(fakeWs, '.git'), { recursive: true }) // 真实工作区是 git 仓库：.git 锚定工作区根，避免远处 tmp 锚桶的 marker 劫持
+  mkdirSync(path.join(fakeWs, 'backend', 'api'), { recursive: true })
+  const execAgent = {
+    signal: new AbortController().signal,
+    agent: { session: { header: { cwd: path.join(fakeWs, 'backend', 'api') } } }, // 官方形态：assembleContextFor 的 agent
+  }
+  const r = await tool('memory_save').execute({ title: 'Write side memory', content: 'Should land in the session workspace, not the process anchor.' }, execAgent)
+  assert.ok(r.saved === true, `应保存成功: ${JSON.stringify(r)}`)
+  assert.ok(r.file.startsWith(fakeWs), `应存进会话工作区: ${r.file}`)
+  const index = await fs.readFile(path.join(fakeWs, '.dsh', 'memory', 'MEMORY.md'), 'utf8')
+  assert.ok(index.includes('Write side memory'), '会话工作区索引应有该条目')
+  assert.ok(index.includes('[backend/api]'), 'path 标签应按会话 cwd（backend/api）')
+})
+
+test('v0.11.1 读侧官方形态：context.agent.session.header.cwd → 注入该工作区', () => {
+  const fakeWs = path.join(tmp, 'write-session-ws')
+  const auto = sections.find(s => s.name === 'dsh-memory:auto')
+  const text = auto.text({ agent: { session: { header: { cwd: path.join(fakeWs, 'backend', 'api') } } } }) // 与写侧同一会话 cwd（根目录会话按设计会懒过滤 [backend/api] 标签）
+  assert.ok(text.includes('## Persistent memory'), '应有注入头')
+  assert.ok(text.includes('Write side memory'), '应注入会话工作区的记忆（读写同桶）')
+})
+
+test('v0.11.1 读写对称：会话存的记忆同一会话能注入回来（跨进程验证修复）', async () => {
+  const fakeWs2 = path.join(tmp, 'rw-symmetry-ws')
+  mkdirSync(path.join(fakeWs2, '.git'), { recursive: true })
+  // 写：exec.agent 指向 fakeWs2
+  const w = await tool('memory_save').execute({ title: 'RW symmetry', content: 'Write then read the same bucket.' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: fakeWs2 } } } })
+  assert.ok(w.saved === true && w.file.startsWith(fakeWs2))
+  // 读：同会话的 assembly 注入
+  const auto = sections.find(s => s.name === 'dsh-memory:auto')
+  const text = auto.text({ agent: { session: { header: { cwd: fakeWs2 } } } })
+  assert.ok(text.includes('RW symmetry'), '该会话下一个 assembly 应注入刚存的记忆（对称性）')
+})

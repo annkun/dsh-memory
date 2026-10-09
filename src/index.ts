@@ -290,6 +290,8 @@ interface SaveCoreInput {
   content: string
   tags?: string[]
   memPathArg?: string
+  /** v0.11: the calling session's working directory (write side of session scoping). */
+  sessionCwd?: string
 }
 
 type SaveCoreResult =
@@ -317,9 +319,13 @@ async function saveMemoryCore(input: SaveCoreInput): Promise<SaveCoreResult> {
     const updated = existing !== undefined
     const file = path.join(dir, `${id}.md`)
     let memPath = (input.memPathArg?.trim() ?? '').replace(/[^a-zA-Z0-9\u4e00-\u9fff/_-]+/g, '-').replace(/^-+|-+$/g, '')
-    if (memPath === '' && scope === 'project' && base === PROJECT_DIR) {
-      const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
-      const cwd = process.cwd()
+    if (memPath === '' && scope === 'project') {
+      // v0.11: the path tag follows the CALLING SESSION's cwd when known (the
+      // tool passes exec.agent's header cwd; the panel has none and keeps the
+      // process default). projRoot derives from the target base itself, so a
+      // session-scoped save tags against ITS workspace, not the service anchor.
+      const projRoot = path.resolve(base, '..', '..') // base = <root>/.dsh/memory
+      const cwd = input.sessionCwd ?? process.cwd()
       if (cwd.startsWith(projRoot + path.sep)) memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
     }
     const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(input.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
@@ -749,7 +755,23 @@ interface SystemPromptService {
  * AssembleContext): an opaque scope key plus the turn's signal. Declared
  * locally — the defining package is internal to the DSH host.
  */
-interface AssembleArgs { scope?: unknown, signal?: unknown }
+interface AssembleArgs { agent?: unknown, scope?: unknown, signal?: unknown }
+
+/**
+ * The canonical session-carrying path on an agent instance, mirroring how the
+ * official agent loop itself reads it:
+ * ctx.systemPrompt.variable("cwd", (context) => context.agent?.session.header.cwd)
+ * (dsh-agent-loop, assembleContextFor sets { agent, scope: agent }).
+ */
+function sessionCwdOfAgent(agent: unknown): string | undefined {
+  if (agent === null || typeof agent !== 'object') return undefined
+  const session = (agent as Record<string, unknown>).session
+  if (session === null || typeof session !== 'object') return undefined
+  const header = (session as Record<string, unknown>).header
+  if (header === null || typeof header !== 'object') return undefined
+  const cwd = (header as Record<string, unknown>).cwd
+  return typeof cwd === 'string' && path.isAbsolute(cwd) && cwd.length > 1 ? cwd : undefined
+}
 
 /**
  * v0.11 session-scoped injection: duck-probe the session's working directory
@@ -809,7 +831,7 @@ function registerMemoryGuidance(ctx: Context): void {
       // path-tag filter follow THAT session (multi-workspace web hosts run
       // many sessions with different cwds). Without it we keep the legacy
       // process-wide behavior — still correct for single-workspace hosts.
-      const sessionCwd = extractSessionCwd(args?.scope) ?? process.cwd()
+      const sessionCwd = sessionCwdOfAgent(args?.agent) ?? sessionCwdOfAgent(args?.scope) ?? extractSessionCwd(args?.scope) ?? process.cwd()
       const projectBase = projectBaseFor(sessionCwd) ?? scopeDir('project')
       const sections: string[] = []
       for (const scope of activeScopes()) {
@@ -890,16 +912,23 @@ export async function apply(ctx: Context): Promise<void> {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
     },
-    async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project', path?: string }, exec) {
+    async execute(args: { title: string, content: string, tags?: string[], scope?: 'user' | 'project', path?: string }, exec: { signal: AbortSignal, agent?: unknown } | { signal: AbortSignal }) {
       if (exec.signal.aborted) return simpleError('aborted', 'Save aborted before completion.')
       const title = safeSlice(args.title.trim(), 60)
       const content = safeSlice(args.content.trim(), MAX_CONTENT_CHARS)
       if (!title || !content) return simpleError('invalid_input', 'title and content must be non-empty.')
+      // v0.11 write-side session scoping: the agent loop sets exec.agent; its
+      // session header cwd decides BOTH the default project scope and the
+      // path tag — reads and writes now target the same per-session workspace
+      // bucket (the rc1 read-only asymmetry is gone). Legacy hosts without
+      // exec.agent keep the process-anchored behavior.
+      const sessionCwd = sessionCwdOfAgent((exec as { agent?: unknown }).agent)
+      const sessionBase = sessionCwd === undefined ? undefined : projectBaseFor(sessionCwd)
       let scope = args.scope
-      if (scope === undefined) scope = PROJECT_DIR === undefined ? 'user' : 'project'
-      const base = scopeDir(scope)
+      if (scope === undefined) scope = (sessionBase ?? PROJECT_DIR) === undefined ? 'user' : 'project'
+      const base = scope === 'project' ? (sessionBase ?? scopeDir('project')) : scopeDir('user')
       if (base === undefined) return simpleError('no_project_scope', 'No git repository detected here; only the "user" scope is available.')
-      const r = await saveMemoryCore({ scope, base, title, content, tags: args.tags, memPathArg: args.path })
+      const r = await saveMemoryCore({ scope, base, title, content, tags: args.tags, memPathArg: args.path, sessionCwd })
       return r.ok ? r : simpleError('save_failed', r.error)
     },
     presentCall: args => ({ card: 'generic' as const, title: `Save memory: ${args.title}` }),

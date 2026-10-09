@@ -29,7 +29,7 @@ Session 2   You: "Which package manager do we use?"
 
 No server. No account. No embedding provider. Just plain markdown files — delete the directory and that scope forgets everything.
 
-**v0.10.0 — the Memory panel: your agent's memory, visualized.** Open **Settings → Memory** and you get a full manager, not a config page: every memory from both scopes in one searchable list, workspaces as an expandable tree (manually-created nested sub-project scopes are discovered automatically), sub-folder grouping, in-panel **add / edit / delete** writing through the exact same guarded pipeline as the agent's own tool calls, and live guard gauges (index lines / KB / file count). What you fix in the UI is exactly what the model sees next session.
+**v0.11 — an EDITABLE memory manager, session-scoped on both sides.** Open **Settings → Memory**: not a config page — a full manager. Every memory from both scopes in one searchable list, workspaces as an expandable tree (nested sub-project scopes discovered automatically), sub-folder grouping, live guard gauges (index lines / KB / file count), and **full in-panel editing**: add, rewrite, or delete any memory through the exact same guarded pipeline as the agent's own tool calls — what you fix in the UI is precisely what the model sees next session. And v0.11 scopes BOTH sides to the session's workspace: each session's prompt carries ITS workspace's memories, and memory_save lands in that same workspace — no more cross-workspace bleed in multi-session web hosts.
 
 ### Why this one
 
@@ -99,7 +99,7 @@ Pure files. No server process, no embedding provider, no account, no database. D
 
 **6. A real visual memory manager (v0.10.0)**
 
-Most memory plugins dump markdown at you. This one ships a panel: Settings → Memory lists both scopes with live guard gauges, groups memories by workspace and sub-folder in an expandable tree, and lets you add, edit, and delete entries in place — one form, identical layout, for both adding and editing. The panel writes through the same guarded pipeline as the agent's tool calls, so the UI and the model can never drift apart.
+Most memory plugins dump markdown at you. This one ships a panel: Settings → Memory lists both scopes with live guard gauges, groups memories by workspace and sub-folder in an expandable tree, and lets you add, edit, and delete entries in place — one form, identical layout, for both adding and editing. The panel writes through the same guarded pipeline as the agent's tool calls, so the UI and the model can never drift apart. Since v0.11 injection and saving are session-scoped together — each session reads ITS workspace and writes back to the same one.
 
 ## Tools
 
