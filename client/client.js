@@ -82,7 +82,10 @@ window.__ModuleLoader__.load({
 				padding: "8px 0",
 				borderBottom: "1px solid var(--border, #e5e5e5)"
 			},
-			itemMain: { minWidth: "0" },
+			itemMain: {
+				minWidth: "0",
+				flex: "1"
+			},
 			tag: {
 				margin: "0 4px",
 				padding: "1px 6px",

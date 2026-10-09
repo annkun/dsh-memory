@@ -55,7 +55,7 @@ const S: Record<string, Partial<CSSStyleDeclaration>> = {
   form: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px', maxWidth: '560px' },
   list: { listStyle: 'none', margin: '0', padding: '0' },
   item: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px', padding: '8px 0', borderBottom: '1px solid var(--border, #e5e5e5)' },
-  itemMain: { minWidth: '0' },
+  itemMain: { minWidth: '0', flex: '1' }, // span the full row so the title-row spacer can pin the buttons right
   tag: { margin: '0 4px', padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-muted, #f2f2f2)', fontSize: '11px' },
   wsHeader: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '6px 0', userSelect: 'none' },
   wsHeaderMain: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1', minWidth: '0' },
