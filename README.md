@@ -29,6 +29,8 @@ Session 2   You: "Which package manager do we use?"
 
 No server. No account. No embedding provider. Just plain markdown files — delete the directory and that scope forgets everything.
 
+**v0.9.0 — Memory panel in the web UI.** Open **Settings → Memory**: every memory from both scopes in one searchable list, with live guard gauges (index lines / KB / file count). Read-only for now; in-panel editing ships next.
+
 ### Why this one
 
 - **30-second setup** — one command, zero config, works on first boot
