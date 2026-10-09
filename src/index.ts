@@ -197,10 +197,24 @@ async function ensureDirs(base: string): Promise<void> {
   await fs.mkdir(memoryDirOf(base), { recursive: true })
 }
 
+/** Parse index body lines, self-healing orphans: a line whose memory file no
+ * longer exists (pruned or hand-deleted) drops out of every read path; the
+ * next save rewrites the index without it. Unparseable lines are kept — never
+ * auto-delete what we cannot parse. */
+function parseIndexLines(text: string, base: string): string[] {
+  const dir = memoryDirOf(base)
+  return text.split('\n').filter(line => {
+    if (!line.startsWith('- ')) return false
+    const m = /\(memories\/([^)]+\.md)\)/.exec(line)
+    if (m === null) return true // no recognizable link — keep
+    return existsSync(path.join(dir, m[1]!))
+  })
+}
+
 async function readIndex(base: string): Promise<string[]> {
   try {
     const text = await fs.readFile(indexFileOf(base), 'utf8')
-    return text.split('\n').filter(line => line.startsWith('- '))
+    return parseIndexLines(text, base)
   } catch {
     return []
   }
@@ -213,7 +227,23 @@ async function writeIndexGuarded(base: string, lines: string[]): Promise<number>
     kept = kept.slice(0, kept.length - 1) // drop oldest (last) entries
   }
   await ensureDirs(base)
-  await fs.writeFile(indexFileOf(base), INDEX_HEADER + kept.join('\n') + '\n', 'utf8')
+  // Atomic on disk (P0): write a sibling tmp file, then rename over the target,
+  // so a crash mid-write can never leave a half-written MEMORY.md — the
+  // prerequisite for a concurrent visual editor. This guarantees file
+  // integrity, not last-writer-wins semantics: the read-modify-write race
+  // (lost update) is deliberately left to the P2 optimistic lock. On Windows
+  // a transiently-open target can fail the rename with EPERM; retry once.
+  const target = indexFileOf(base)
+  // unique tmp suffix: concurrent writers must never share a tmp path (a shared
+  // name lets one writer's cleanup delete another's staged file mid-rename)
+  const tmp = `${target}.${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.tmp`
+  await fs.writeFile(tmp, INDEX_HEADER + kept.join('\n') + '\n', 'utf8')
+  try {
+    await fs.rename(tmp, target)
+  } catch {
+    await new Promise(resolve => setTimeout(resolve, 50)) // Windows EPERM: target briefly open
+    await fs.rename(tmp, target)
+  }
   return kept.length
 }
 
@@ -297,7 +327,7 @@ function registerMemoryGuidance(ctx: Context): void {
         } catch {
           continue // nothing remembered in this scope yet
         }
-        let lines = index.split('\n').filter(l => l.startsWith('- '))
+        let lines = parseIndexLines(index, base) // orphans (deleted memory files) stay out of the prompt
         let hiddenElsewhere = 0
         if (scope === 'project' && PROJECT_DIR !== undefined) {
           // CLAUDE.md-style lazy injection: root-level (untagged) project
