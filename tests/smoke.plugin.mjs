@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
@@ -284,4 +285,38 @@ test('P2.3 手动嵌套作用域：子文件夹里的 .dsh/memory 被发现并�
   assert.equal(nestedGroup.name, 'sub', '嵌套组名应为相对路径名')
   assert.equal(nestedGroup.nested, true)
   assert.ok(nestedGroup.entries.length >= 1, '嵌套作用域的条目应可见')
+})
+
+test('v0.11 会话级注入：scope 携带会话 cwd → 注入该工作区的记忆', () => {
+  const fakeWs = path.join(tmp, 'session-ws')
+  const base = path.join(fakeWs, '.dsh', 'memory')
+  mkdirSync(path.join(base, 'memories'), { recursive: true })
+  writeFileSync(path.join(base, 'memories', '20261009-180000-session-only.md'), '---\nid: y\nscope: project\npath: \nsaved_at: 2026-10-09T18:00:00.000Z\ntags: \n---\n\n# Session workspace memory\n\nOnly visible to sessions in session-ws.\n')
+  writeFileSync(path.join(base, 'MEMORY.md'), '# Memory Index\n\n- [Session workspace memory](memories/20261009-180000-session-only.md) — Only visible to sessions in session-ws. (2026-10-09)\n')
+  const auto = sections.find(s => s.name === 'dsh-memory:auto')
+  // 会话 scope 指向 fakeWs → 注入 fakeWs 的条目
+  const wsText = auto.text({ scope: { cwd: fakeWs } })
+  assert.ok(wsText.includes('## Persistent memory'), '应有注入头')
+  assert.ok(wsText.includes('Session workspace memory'), '应注入会话工作区的记忆')
+  // 无 scope（回退进程 cwd）→ 不含 fakeWs 条目
+  const homeText = auto.text({})
+  assert.ok(!homeText.includes('Session workspace memory'), '进程 cwd 会话不应看到 fakeWs 的记忆')
+})
+
+test('v0.11 会话级注入：path 标签按会话 cwd 过滤', () => {
+  const fakeWs = path.join(tmp, 'session-ws2')
+  const base = path.join(fakeWs, '.dsh', 'memory')
+  mkdirSync(path.join(base, 'memories'), { recursive: true })
+  writeFileSync(path.join(base, 'memories', '20261009-181000-root-mem.md'), 'x')
+  writeFileSync(path.join(base, 'memories', '20261009-181001-api-mem.md'), 'y')
+  writeFileSync(path.join(base, 'MEMORY.md'), '# Memory Index\n\n- [Root memory](memories/20261009-181000-root-mem.md) — root level. (2026-10-09)\n- [API memory](memories/20261009-181001-api-mem.md) — api only. (2026-10-09) [backend/api]\n')
+  const auto = sections.find(s => s.name === 'dsh-memory:auto')
+  // 会话 cwd 在 backend/api → root 级 + [backend/api] 标签的都注入
+  const inApi = auto.text({ scope: { cwd: path.join(fakeWs, 'backend', 'api') } })
+  assert.ok(inApi.includes('Root memory') && inApi.includes('API memory'), '会话在 backend/api：root + api 标签都应注入')
+  // 会话 cwd 在别处 → api 标签被过滤且提示可搜
+  const outside = auto.text({ scope: { cwd: path.join(fakeWs, 'frontend') } })
+  assert.ok(outside.includes('Root memory'), 'root 级恒注入')
+  assert.ok(!outside.includes('] — api only'), '他区标签记忆不应注入正文')
+  assert.ok(outside.includes('memory_search surfaces them'), '应提示其他区域记忆可搜')
 })

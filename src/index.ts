@@ -744,6 +744,47 @@ interface SystemPromptService {
   section(spec: { name: string, order?: number, text: (args: unknown) => string }): unknown
 }
 
+/**
+ * Structural type for the host's per-assembly arguments (dsh-system-prompt
+ * AssembleContext): an opaque scope key plus the turn's signal. Declared
+ * locally — the defining package is internal to the DSH host.
+ */
+interface AssembleArgs { scope?: unknown, signal?: unknown }
+
+/**
+ * v0.11 session-scoped injection: duck-probe the session's working directory
+ * off the opaque scope key. Host internals are not exported, so several
+ * plausible shapes are accepted (agent cwd / meta.cwd / session.{cwd,meta.cwd}
+ * / workspace.path); an absolute existing-style string wins. Returns undefined
+ * when the key carries nothing readable — callers then keep the legacy
+ * process-cwd behavior (correct for single-workspace hosts).
+ */
+function extractSessionCwd(scope: unknown): string | undefined {
+  if (scope === null || typeof scope !== 'object') return undefined
+  const s = scope as Record<string, unknown>
+  const meta = typeof s.meta === 'object' && s.meta !== null ? s.meta as Record<string, unknown> : undefined
+  const session = typeof s.session === 'object' && s.session !== null ? s.session as Record<string, unknown> : undefined
+  const sessionMeta = session !== undefined && typeof session.meta === 'object' && session.meta !== null ? session.meta as Record<string, unknown> : undefined
+  const workspace = typeof s.workspace === 'object' && s.workspace !== null ? s.workspace as Record<string, unknown> : undefined
+  for (const raw of [s.cwd, meta?.cwd, session?.cwd, sessionMeta?.cwd, workspace?.path]) {
+    if (typeof raw === 'string' && path.isAbsolute(raw) && raw.length > 1) return raw
+  }
+  return undefined
+}
+
+/** Per-session project-base cache: text() re-evaluates every agent step, and
+ * the upward root walk is pure filesystem — memoize by session cwd. */
+const sessionProjectBaseCache = new Map<string, string | undefined>()
+
+function projectBaseFor(cwd: string): string | undefined {
+  const cached = sessionProjectBaseCache.get(cwd)
+  if (cached !== undefined || sessionProjectBaseCache.has(cwd)) return cached
+  const base = resolveProjectScope(cwd).dir // resolveProjectScope already returns <root>/.dsh/memory
+  if (sessionProjectBaseCache.size > 100) sessionProjectBaseCache.clear()
+  sessionProjectBaseCache.set(cwd, base)
+  return base
+}
+
 function registerMemoryGuidance(ctx: Context): void {
   const systemPrompt = (ctx as unknown as { systemPrompt?: SystemPromptService }).systemPrompt
   if (systemPrompt === undefined) return // host composition has no systemPrompt service
@@ -761,10 +802,18 @@ function registerMemoryGuidance(ctx: Context): void {
   systemPrompt.section({
     name: 'dsh-memory:auto',
     order,
-    text: () => {
+    text: (context: unknown) => {
+      const args = context as AssembleArgs | undefined
+      // v0.11: each assembly carries the calling session's scope key; when it
+      // exposes a working directory, both the injected project scope and the
+      // path-tag filter follow THAT session (multi-workspace web hosts run
+      // many sessions with different cwds). Without it we keep the legacy
+      // process-wide behavior — still correct for single-workspace hosts.
+      const sessionCwd = extractSessionCwd(args?.scope) ?? process.cwd()
+      const projectBase = projectBaseFor(sessionCwd) ?? scopeDir('project')
       const sections: string[] = []
       for (const scope of activeScopes()) {
-        const base = scopeDir(scope)
+        const base = scope === 'project' ? projectBase : scopeDir(scope)
         if (base === undefined) continue
         let index = ''
         try {
@@ -774,13 +823,13 @@ function registerMemoryGuidance(ctx: Context): void {
         }
         let lines = parseIndexLines(index, base) // orphans (deleted memory files) stay out of the prompt
         let hiddenElsewhere = 0
-        if (scope === 'project' && PROJECT_DIR !== undefined) {
+        if (scope === 'project' && base !== undefined) {
           // CLAUDE.md-style lazy injection: root-level (untagged) project
           // memories always inject; path-tagged memories only inject when the
           // session's working directory falls inside that path — "you see
           // memories for where you work."
-          const projRoot = path.resolve(PROJECT_DIR, '..', '..')
-          const cwd = process.cwd()
+          const projRoot = path.resolve(base, '..', '..')
+          const cwd = sessionCwd
           // path-boundary check: a same-prefix sibling (myproj vs myproj0)
           // must not be treated as inside the project
           const rel = cwd.startsWith(projRoot + path.sep) ? path.relative(projRoot, cwd).split(path.sep).join('/') : ''
