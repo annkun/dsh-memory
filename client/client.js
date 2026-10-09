@@ -272,16 +272,24 @@ window.__ModuleLoader__.load({
 		}
 		function UserSection(props) {
 			const [adding, setAdding] = (0, react.useState)(false);
+			const [open, setOpen] = (0, react.useState)(true);
 			const { info, query } = props;
 			const target = { scope: "user" };
-			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("div", { style: S.wsHeader }, (0, react.createElement)("span", { style: {
+			return (0, react.createElement)("section", { style: S.section }, (0, react.createElement)("div", { style: S.wsHeader }, (0, react.createElement)("div", {
+				style: S.wsHeaderMain,
+				onClick: () => {
+					setOpen(!open);
+				}
+			}, (0, react.createElement)("span", { style: {
 				...S.chevron,
-				transform: "rotate(90deg)"
-			} }, "▸"), (0, react.createElement)("strong", null, "User"), (0, react.createElement)("span", { style: S.muted }, info?.available === true ? gauge(info.stats) : ""), (0, react.createElement)("span", { style: { flex: "1" } }), (0, react.createElement)("button", {
+				transform: open ? "rotate(90deg)" : "rotate(0deg)"
+			} }, "▸"), (0, react.createElement)("strong", null, "User"), (0, react.createElement)("span", { style: S.muted }, info?.available === true ? gauge(info.stats) : "")), (0, react.createElement)("button", {
 				style: S.smallButton,
 				title: "Add a user memory",
-				onClick: () => setAdding(!adding)
-			}, adding ? "×" : "+")), adding ? (0, react.createElement)(AddForm, {
+				onClick: () => {
+					setAdding(!adding);
+				}
+			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(AddForm, {
 				target,
 				onDone: () => {
 					setAdding(false);
@@ -293,7 +301,7 @@ window.__ModuleLoader__.load({
 				emptyText: "No memories yet.",
 				target,
 				onSaved: props.onSaved
-			}));
+			})) : null);
 		}
 		function WorkspaceSection(props) {
 			const [adding, setAdding] = (0, react.useState)(false);

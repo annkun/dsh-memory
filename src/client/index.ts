@@ -219,20 +219,24 @@ function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTa
 
 function UserSection(props: { info: ScopeInfo | undefined, query: string, onSaved: () => void }): ReactElement {
   const [adding, setAdding] = useState(false)
+  const [open, setOpen] = useState(true)
   const { info, query } = props
   const target: SaveTarget = { scope: 'user' }
   return h('section', { style: S.section },
     h('div', { style: S.wsHeader },
-      h('span', { style: { ...S.chevron, transform: 'rotate(90deg)' } }, '▸'),
-      h('strong', null, 'User'),
-      h('span', { style: S.muted }, info?.available === true ? gauge(info.stats!) : ''),
-      h('span', { style: { flex: '1' } }),
-      h('button', { style: S.smallButton, title: 'Add a user memory', onClick: () => setAdding(!adding) }, adding ? '×' : '+'),
+      h('div', { style: S.wsHeaderMain, onClick: () => { setOpen(!open) } },
+        h('span', { style: { ...S.chevron, transform: open ? 'rotate(90deg)' : 'rotate(0deg)' } }, '▸'),
+        h('strong', null, 'User'),
+        h('span', { style: S.muted }, info?.available === true ? gauge(info.stats!) : ''),
+      ),
+      h('button', { style: S.smallButton, title: 'Add a user memory', onClick: () => { setAdding(!adding) } }, adding ? '×' : '+'),
     ),
-    adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
-    info?.available !== true
-      ? h('p', { style: S.muted }, 'Not available in this workspace')
-      : h(GroupedEntries, { entries: info.entries ?? [], query, emptyText: 'No memories yet.', target, onSaved: props.onSaved }),
+    open ? h('div', null,
+      adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
+      info?.available !== true
+        ? h('p', { style: S.muted }, 'Not available in this workspace')
+        : h(GroupedEntries, { entries: info.entries ?? [], query, emptyText: 'No memories yet.', target, onSaved: props.onSaved }),
+    ) : null,
   )
 }
 
