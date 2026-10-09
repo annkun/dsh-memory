@@ -398,3 +398,18 @@ test('v0.11.1 review 缺口③：list 合并两桶', async () => {
   assert.ok(out.project.entries.some(l => l.includes('Review gap')), '会话桶在列表')
   assert.ok(out.project.entries.some(l => l.includes('Prefer Pnpm')), '锚桶 project 记忆也在列表（合并）')
 })
+
+test('v0.11.2 空态显示：目录存在但无记忆的工作区也列出（引导添加第一条）', async () => {
+  const emptyWs = path.join(tmp, 'empty-but-real-ws')
+  mkdirSync(emptyWs, { recursive: true }) // 目录存在、无 .dsh/memory
+  const { writeFileSync: wf } = await import('node:fs')
+  wf(path.join(tmp, 'workspaces.json'), JSON.stringify({ workspaces: [emptyWs] }), 'utf8')
+  const route = webRoutes.find(rr => rr.path === '/dsh-memory/api/v1/list')
+  let body = ''
+  route.handler({}, { writeHead: () => {}, end: s => { body = s } })
+  for (let i = 0; i < 50 && body === ''; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  const group = JSON.parse(body).scopes.projects.find(p => p.root === emptyWs)
+  assert.ok(group, '空工作区应显示（空态）')
+  assert.equal(group.entries.length, 0, '条目为空')
+  assert.equal(group.stats.entries, 0, 'stats 全 0')
+})

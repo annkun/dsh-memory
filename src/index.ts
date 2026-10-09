@@ -730,11 +730,13 @@ async function buildPanelPayload(ctx: Context): Promise<Record<string, unknown>>
   for (const root of ordered) {
     if (seen.has(root)) continue
     seen.add(root)
+    // Empty-state visibility (v0.11.2): a workspace whose directory exists
+    // shows even with zero memories — the empty group is where the user adds
+    // the first one. Only a workspace whose directory is GONE is filtered.
+    if (!existsSync(root)) continue
     const base = path.join(root, '.dsh', 'memory')
-    if (existsSync(base)) { // nothing ever saved in a workspace without it — but a nested scope inside may still exist
-      const s = scopeStats(base)
-      projects.push({ root, name: path.basename(root) || root, serviceAnchor: root === currentRoot, stats: s.stats, entries: s.entries })
-    }
+    const s = scopeStats(base) // no .dsh/memory yet → all-zero stats + empty entries
+    projects.push({ root, name: path.basename(root) || root, serviceAnchor: root === currentRoot, stats: s.stats, entries: s.entries })
   }
   // nested scopes: a sub-folder .dsh/memory may be discoverable from several
   // roots (e.g. the cwd-fallback current root and its real parent workspace);
