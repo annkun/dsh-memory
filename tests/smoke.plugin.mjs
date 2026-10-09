@@ -145,7 +145,7 @@ test('P1 数据桥：GET /dsh-memory/api/v1/list 返回双域 JSON', async () =>
   assert.ok(Array.isArray(data.scopes.projects), 'P2: projects 应为工作区数组')
   assert.ok(data.scopes.projects.length >= 1, '当前工作区应在列表中')
   const p = data.scopes.projects[0]
-  assert.ok(p.current === true && Array.isArray(p.entries) && p.entries.length >= 1, '当前工作区应有已存记忆')
+  assert.ok(p.serviceAnchor === true && Array.isArray(p.entries) && p.entries.length >= 1, '服务锚点工作区应有已存记忆')
   assert.ok(typeof p.stats.indexBytes === 'number' && p.stats.maxBytes === 25600, '护栏统计应含字节数')
   const entry = p.entries[0]
   assert.ok(entry.title && entry.date, '条目应解析出 title/date')
@@ -355,4 +355,46 @@ test('v0.11.1 读写对称：会话存的记忆同一会话能注入回来（跨
   const auto = sections.find(s => s.name === 'dsh-memory:auto')
   const text = auto.text({ agent: { session: { header: { cwd: fakeWs2 } } } })
   assert.ok(text.includes('RW symmetry'), '该会话下一个 assembly 应注入刚存的记忆（对称性）')
+})
+
+test('v0.11.1 review 缺口①：会话保存 → 账本记录 → 面板可见（独立目录）', async () => {
+  // review 场景复现：会话工作区不在服务锚内部、无 registry 记录
+  const ws = path.join(tmp, 'review-ws')  // 独立目录（tmp 下但 self-contained）
+  mkdirSync(path.join(ws, '.git'), { recursive: true })
+  const r = await tool('memory_save').execute({ title: 'Review gap memory', content: 'Session saved into an independent workspace.' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: ws } } } })
+  assert.ok(r.saved === true && r.file.startsWith(ws), '会话保存应落进独立工作区')
+  await new Promise(resolve => setTimeout(resolve, 100)) // 账本 fire-and-forget
+  const ledger = JSON.parse(await fs.readFile(path.join(tmp, 'workspaces.json'), 'utf8'))
+  assert.ok(ledger.workspaces.includes(ws), '账本应含会话工作区')
+  const route = webRoutes.find(rr => rr.path === '/dsh-memory/api/v1/list')
+  let body = ''
+  route.handler({}, { writeHead: () => {}, end: s => { body = s } })
+  for (let i = 0; i < 50 && body === ''; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  const roots = JSON.parse(body).scopes.projects.map(p => p.root)
+  assert.ok(roots.includes(ws), '面板应枚举出会话写入的工作区')
+})
+
+test('v0.11.1 review 缺口③：search 跨会话桶 + 锚桶（注入契约）', async () => {
+  // 会话桶记忆可搜（注入说 memory_search surfaces them）
+  const s1 = await tool('memory_search').execute({ query: 'Review gap' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: path.join(tmp, 'review-ws') } } } })
+  assert.ok(s1.matches.length >= 1, '会话桶记忆应可搜')
+  // 锚桶旧记忆仍可搜（无 exec.agent 回退）
+  const s2 = await tool('memory_search').execute({ query: 'Panel-added' }, { signal: new AbortController().signal })
+  assert.ok(s2.matches.length >= 1, '锚桶旧记忆仍可搜（兜底）')
+})
+
+test('v0.11.1 review 缺口③：read 会话桶优先 + 锚桶兜底', async () => {
+  const s1 = await tool('memory_search').execute({ query: 'Review gap' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: path.join(tmp, 'review-ws') } } } })
+  const id = s1.matches[0].id
+  const r1 = await tool('memory_read').execute({ id }, { signal: new AbortController().signal, agent: { session: { header: { cwd: path.join(tmp, 'review-ws') } } } })
+  assert.ok(r1.content?.includes('independent workspace'), '会话桶读取')
+  const s2 = await tool('memory_search').execute({ query: 'Panel-added' }, { signal: new AbortController().signal })
+  const r2 = await tool('memory_read').execute({ id: s2.matches[0].id }, { signal: new AbortController().signal })
+  assert.ok(r2.content !== undefined, '锚桶兜底读取')
+})
+
+test('v0.11.1 review 缺口③：list 合并两桶', async () => {
+  const out = await tool('memory_list').execute({}, { signal: new AbortController().signal, agent: { session: { header: { cwd: path.join(tmp, 'review-ws') } } } })
+  assert.ok(out.project.entries.some(l => l.includes('Review gap')), '会话桶在列表')
+  assert.ok(out.project.entries.some(l => l.includes('Prefer Pnpm')), '锚桶 project 记忆也在列表（合并）')
 })

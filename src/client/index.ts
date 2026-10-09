@@ -33,7 +33,7 @@ interface ScopeStats {
 interface ScopeInfo { available: boolean, stats?: ScopeStats, entries?: PanelEntry[] }
 
 interface WorkspaceInfo {
-  root: string, name: string, current: boolean, nested?: boolean,
+  root: string, name: string, serviceAnchor: boolean, nested?: boolean,
   stats: ScopeStats, entries: PanelEntry[],
 }
 
@@ -118,7 +118,7 @@ function MemoryPanel(): ReactElement {
   if (!defaultExpanded) {
     // first paint: expand the current workspace only
     setDefaultExpanded(true)
-    setExpanded(new Set(workspaces.filter(w => w.current).map(w => w.root)))
+    setExpanded(new Set(workspaces.filter(w => w.serviceAnchor).map(w => w.root)))
   }
 
   const q = query.trim().toLowerCase()
@@ -324,7 +324,7 @@ function WorkspaceSection(props: { ws: WorkspaceInfo, query: string, open: boole
       h('div', { style: S.wsHeaderMain, onClick: onToggle },
         h('span', { style: { ...S.chevron, transform: open ? 'rotate(90deg)' : 'rotate(0deg)' } }, '▸'),
         h('strong', null, ws.name),
-        ws.current ? h('code', { style: S.current }, 'current') : null,
+        ws.serviceAnchor ? h('code', { style: S.current }, 'anchor') : null,
         ws.nested === true ? h('code', { style: S.current }, 'sub') : null,
         h('span', { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`),
       ),

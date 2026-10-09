@@ -187,7 +187,7 @@ window.__ModuleLoader__.load({
 			const workspaces = data.scopes.projects ?? [];
 			if (!defaultExpanded) {
 				setDefaultExpanded(true);
-				setExpanded(new Set(workspaces.filter((w) => w.current).map((w) => w.root)));
+				setExpanded(new Set(workspaces.filter((w) => w.serviceAnchor).map((w) => w.root)));
 			}
 			const q = query.trim().toLowerCase();
 			const searchActive = q !== "";
@@ -458,7 +458,7 @@ window.__ModuleLoader__.load({
 			}, (0, react.createElement)("span", { style: {
 				...S.chevron,
 				transform: open ? "rotate(90deg)" : "rotate(0deg)"
-			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.current ? (0, react.createElement)("code", { style: S.current }, "current") : null, ws.nested === true ? (0, react.createElement)("code", { style: S.current }, "sub") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), (0, react.createElement)("button", {
+			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.serviceAnchor ? (0, react.createElement)("code", { style: S.current }, "anchor") : null, ws.nested === true ? (0, react.createElement)("code", { style: S.current }, "sub") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), (0, react.createElement)("button", {
 				style: S.smallButton,
 				title: `Add a memory in ${ws.name}`,
 				onClick: () => setAdding(!adding)

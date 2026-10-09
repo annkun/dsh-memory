@@ -337,6 +337,7 @@ async function saveMemoryCore(input: SaveCoreInput): Promise<SaveCoreResult> {
     lines.unshift(indexLine)
     const kept = await writeIndexGuarded(base, lines)
     const pruned = updated ? 0 : await pruneMemories(base)
+    if (scope === 'project') void recordSessionWorkspace(path.resolve(base, '..', '..')) // panel enumeration sees this workspace next refresh
     return {
       ok: true, saved: true, id, scope, file, updated, indexEntries: kept, prunedMemories: pruned,
       notice: `${updated ? `Updated existing ${scope} memory ${id}` : `Saved 1 ${scope} memory`} (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
@@ -547,6 +548,37 @@ async function handlePanelUpdate(ctx: Context, request: IncomingMessage, respons
   }
 }
 
+/** Ledger a workspace root a session actually SAVED into (v0.11.1): the save
+ * itself is the strongest "this workspace is real" evidence, so unlike the
+ * boot-time recordWorkspace there is no cwd-source guard. Fire-and-forget. */
+async function recordSessionWorkspace(root: string): Promise<void> {
+  try {
+    const file = path.join(USER_DIR, 'workspaces.json')
+    let parsed: unknown = []
+    try { parsed = JSON.parse(readFileSync(file, 'utf8')).workspaces } catch { /* fresh */ }
+    const list = (Array.isArray(parsed) ? parsed : []).filter((w): w is string => typeof w === 'string' && path.isAbsolute(w))
+    if (list.includes(root)) return
+    list.unshift(root)
+    await atomicWriteFile(file, JSON.stringify({ workspaces: list.slice(0, 50) }, null, 2) + '\n')
+  } catch { /* best-effort: a failed ledger write never blocks the save */ }
+}
+
+/**
+ * v0.11.1: project-scope buckets a tool should touch for THIS call — the
+ * calling session's workspace first (exec.agent, when the agent loop set it),
+ * then the service-anchor bucket as fallback so pre-session-era memories
+ * stay reachable. Deduped; single-element in single-workspace hosts.
+ */
+function projectBasesFor(exec: unknown): string[] {
+  const bases: string[] = []
+  const sessionCwd = sessionCwdOfAgent((exec as { agent?: unknown } | undefined)?.agent)
+  const sessionBase = sessionCwd === undefined ? undefined : projectBaseFor(sessionCwd)
+  const anchorBase = scopeDir('project')
+  if (sessionBase !== undefined) bases.push(sessionBase)
+  if (anchorBase !== undefined && !bases.includes(anchorBase)) bases.push(anchorBase)
+  return bases
+}
+
 /**
  * Discover manually-created nested memory scopes (a .dsh/memory copied into a
  * sub-folder — an intentional sub-project scope per the resolution chain).
@@ -701,7 +733,7 @@ async function buildPanelPayload(ctx: Context): Promise<Record<string, unknown>>
     const base = path.join(root, '.dsh', 'memory')
     if (existsSync(base)) { // nothing ever saved in a workspace without it — but a nested scope inside may still exist
       const s = scopeStats(base)
-      projects.push({ root, name: path.basename(root) || root, current: root === currentRoot, stats: s.stats, entries: s.entries })
+      projects.push({ root, name: path.basename(root) || root, serviceAnchor: root === currentRoot, stats: s.stats, entries: s.entries })
     }
   }
   // nested scopes: a sub-folder .dsh/memory may be discoverable from several
@@ -719,7 +751,7 @@ async function buildPanelPayload(ctx: Context): Promise<Record<string, unknown>>
     if (seen.has(nestedRoot)) continue
     seen.add(nestedRoot)
     const s = scopeStats(path.join(nestedRoot, '.dsh', 'memory'))
-    projects.push({ root: nestedRoot, name, nested: true, current: nestedRoot === currentRoot, stats: s.stats, entries: s.entries })
+    projects.push({ root: nestedRoot, name, nested: true, serviceAnchor: nestedRoot === currentRoot, stats: s.stats, entries: s.entries })
   }
   scopes.projects = projects
   return { scopes }
@@ -957,8 +989,11 @@ export async function apply(ctx: Context): Promise<void> {
       const scopes = args.scope === undefined ? activeScopes() : [args.scope]
       const matches: Array<{ scope: string, id: string, title: string, excerpt: string }> = []
       for (const scope of scopes) {
-        const base = scopeDir(scope)
-        if (base === undefined) continue
+        // v0.11.1: the project scope follows the calling session's workspace
+        // first, the service anchor second — the injection's "memory_search
+        // surfaces them" promise holds in multi-workspace web hosts.
+        const bases = scope === 'project' ? projectBasesFor(exec) : [scopeDir(scope)].filter((b): b is string => b !== undefined)
+        for (const base of bases) {
         const dir = memoryDirOf(base)
         const files = (await fs.readdir(dir).catch(() => [] as string[])).filter(f => f.endsWith('.md')).sort().reverse()
         for (const f of files) {
@@ -972,6 +1007,7 @@ export async function apply(ctx: Context): Promise<void> {
             const titleLine = /^#\s+(.+)$/m.exec(text)?.[1] ?? f
             matches.push({ scope, id: f.replace(/\.md$/, ''), title: titleLine, excerpt: excerpt(text, q) })
           }
+        }
         }
       }
       return { query: q, total: matches.length, matches }
@@ -999,8 +1035,10 @@ export async function apply(ctx: Context): Promise<void> {
       // truncated — oversized memories return a truncated preview plus the
       // on-disk path instead of flooding the context window.
       for (const scope of ['project', 'user'] as const) {
-        const base = scopeDir(scope)
-        if (base === undefined) continue
+        // v0.11.1: project reads try the calling session's workspace first,
+        // then the service anchor — old memories stay readable.
+        const bases = scope === 'project' ? projectBasesFor(exec) : [scopeDir(scope)].filter((b): b is string => b !== undefined)
+        for (const base of bases) {
         const file = path.join(memoryDirOf(base), `${safe}.md`)
         try {
           const [content, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
@@ -1016,6 +1054,7 @@ export async function apply(ctx: Context): Promise<void> {
           return { id: safe, scope, content, truncated: false, local_file: file, size_bytes, updated_at }
         } catch {
           continue
+        }
         }
       }
       return simpleError('memory_not_found', `No memory with id ${safe}. Use memory_search to find valid ids.`)
@@ -1040,9 +1079,19 @@ export async function apply(ctx: Context): Promise<void> {
       const limit = Math.min(Math.max(Math.trunc(args.limit ?? DEFAULT_SEARCH_LIMIT), 1), 50)
       const out: Record<string, { total: number, truncated: boolean, entries: string[] }> = {}
       for (const scope of activeScopes()) {
-        const base = scopeDir(scope)
-        if (base === undefined) continue
-        const all = await readIndex(base)
+        // v0.11.1: project lists merge the session workspace and the service
+        // anchor (session first, id-deduped) so both stay visible.
+        const bases = scope === 'project' ? projectBasesFor(exec) : [scopeDir(scope)].filter((b): b is string => b !== undefined)
+        let all: string[] = []
+        const seenIds = new Set<string>()
+        for (const base of bases) {
+          for (const line of await readIndex(base)) {
+            const idMatch = /\(memories\/([^)]+)\)/.exec(line)?.[1]
+            if (idMatch !== undefined && seenIds.has(idMatch)) continue
+            if (idMatch !== undefined) seenIds.add(idMatch)
+            all.push(line)
+          }
+        }
         const lines = all.slice(0, limit)
         out[scope] = { total: lines.length, truncated: all.length > lines.length, entries: lines }
       }
