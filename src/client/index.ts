@@ -33,7 +33,7 @@ interface ScopeStats {
 interface ScopeInfo { available: boolean, stats?: ScopeStats, entries?: PanelEntry[] }
 
 interface WorkspaceInfo {
-  root: string, name: string, current: boolean,
+  root: string, name: string, current: boolean, nested?: boolean,
   stats: ScopeStats, entries: PanelEntry[],
 }
 
@@ -61,6 +61,7 @@ const S: Record<string, Partial<CSSStyleDeclaration>> = {
   wsHeaderMain: { display: 'flex', alignItems: 'center', gap: '8px', flex: '1', minWidth: '0' },
   chevron: { display: 'inline-block', width: '1em', transition: 'transform 120ms' },
   current: { margin: '0', padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-accent, #e0ecff)', fontSize: '11px' },
+  titleRow: { display: 'flex', alignItems: 'baseline', gap: '4px', flexWrap: 'nowrap' },
   pathGroup: { marginLeft: '18px', borderLeft: '1px solid var(--border, #e5e5e5)', paddingLeft: '10px', marginTop: '4px' },
   pathHeader: { color: 'var(--fg-muted, #888)', fontSize: '12px', padding: '4px 0' },
   scroller: { maxHeight: '60vh', overflowY: 'auto', paddingRight: '8px' },
@@ -208,29 +209,22 @@ function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTa
     props.entries.map((e, i) => {
       if (e.id !== undefined && editing === e.id) {
         return h('li', { key: e.id, style: S.item },
-          h(EditForm, { target: props.target, entry: e, onDone: () => { setEditing(null); props.onSaved() } }))
+          h(MemoryForm, { target: props.target, initial: e, onDone: () => { setEditing(null); props.onSaved() } }))
       }
       return h('li', { key: e.id ?? i, style: S.item },
         h('div', { style: S.itemMain },
-          h('div', null,
+          h('div', { style: S.titleRow },
             h('strong', null, e.title),
-            e.tags.map(t => h('code', { key: t, style: S.tag }, t))),
+            e.tags.map(t => h('code', { key: t, style: S.tag }, t)),
+            h('span', { style: { flex: '1', minWidth: '8px' } }),
+            e.id !== undefined
+              ? h('button', { style: S.smallButton, title: 'Edit this memory', onClick: () => { setEditing(e.id!); setRowError(null) } }, '✎')
+              : null,
+            e.id !== undefined
+              ? h('button', { style: S.smallButton, title: 'Delete this memory', disabled: deleting === e.id, onClick: () => del(e) }, deleting === e.id ? '…' : '×')
+              : null,
+          ),
           h('div', { style: S.muted }, e.date !== '' ? `${e.date} — ` : '', e.excerpt),
-        ),
-        h('div', null,
-          e.id !== undefined
-            ? h('button', {
-                style: S.smallButton, title: 'Edit this memory',
-                onClick: () => { setEditing(e.id!); setRowError(null) },
-              }, '✎')
-            : null,
-          e.id !== undefined
-            ? h('button', {
-                style: S.smallButton, title: 'Delete this memory',
-                disabled: deleting === e.id,
-                onClick: () => del(e),
-              }, deleting === e.id ? '…' : '×')
-            : null,
         ),
       )
     }),
@@ -238,42 +232,43 @@ function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTa
 }
 
 /** Inline edit form: fetches the full text on demand, saves via /update. */
-function EditForm(props: { target: SaveTarget, entry: PanelEntry, onDone: () => void }): ReactElement {
-  const [title, setTitle] = useState(props.entry.title)
+/** One form, two modes — add (empty, /save) and edit (prefilled via /read, /update). Identical layout and size. */
+function MemoryForm(props: { target: SaveTarget, initial?: PanelEntry, onDone: () => void }): ReactElement {
+  const editing = props.initial !== undefined && props.initial.id !== undefined
+  const [title, setTitle] = useState(props.initial?.title ?? '')
   const [content, setContent] = useState('')
-  const [tags, setTags] = useState(props.entry.tags.join(', '))
-  const [loading, setLoading] = useState(true)
+  const [tags, setTags] = useState(props.initial?.tags.join(', ') ?? '')
+  const [loading, setLoading] = useState(editing)
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   useEffect(() => {
+    if (!editing) return
     fetch('/dsh-memory/api/v1/read', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ scope: props.target.scope, workspace: props.target.workspace, id: props.entry.id }),
+      body: JSON.stringify({ scope: props.target.scope, workspace: props.target.workspace, id: props.initial!.id }),
     })
       .then(async r => {
         const d = r.json() as Promise<{ ok?: boolean, error?: string, content?: string }>
         if (!r.ok || (await d).ok !== true) throw new Error((await d as { error?: string }).error ?? `HTTP ${r.status}`)
         return d
       })
-      .then(d => { setContent(d.content ?? ''); setLoading(false) })
-      .catch(err => { setFormError(String(err)); setLoading(false) })
+      .then(d => { setContent(d.content ?? '') })
+      .catch(err => { setFormError(String(err)) })
+      .finally(() => { setLoading(false) })
   }, [])
   const submit = (e: FormEvent): void => {
     e.preventDefault()
     if (saving) return
     setSaving(true)
     setFormError(null)
-    fetch('/dsh-memory/api/v1/update', {
+    const tagList = tags.split(',').map(t => t.trim()).filter(t => t !== '')
+    fetch(editing ? '/dsh-memory/api/v1/update' : '/dsh-memory/api/v1/save', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        scope: props.target.scope,
-        workspace: props.target.workspace,
-        id: props.entry.id,
-        title, content,
-        tags: tags.split(',').map(t => t.trim()).filter(t => t !== ''),
-      }),
+      body: JSON.stringify(editing
+        ? { scope: props.target.scope, workspace: props.target.workspace, id: props.initial!.id, title, content, tags: tagList }
+        : { scope: props.target.scope, workspace: props.target.workspace, title, content, tags: tagList }),
     })
       .then(async r => {
         const d = r.json() as Promise<{ ok?: boolean, error?: string }>
@@ -284,14 +279,13 @@ function EditForm(props: { target: SaveTarget, entry: PanelEntry, onDone: () => 
   }
   if (loading && formError === null) return h('div', { style: S.form }, 'Loading…')
   return h('form', { style: S.form, onSubmit: submit },
-    h('input', { style: S.input, placeholder: 'Title', value: title, maxLength: 60, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
-    h('textarea', { style: S.textarea, value: content, rows: 6, onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value) }),
-    h('input', { style: S.input, placeholder: 'Tags, comma-separated', value: tags, onChange: (e: ChangeEvent<HTMLInputElement>) => setTags(e.target.value) }),
+    h('input', { style: S.input, placeholder: 'Title (max 60 chars)', value: title, maxLength: 60, autoFocus: true, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
+    h('textarea', { style: S.textarea, placeholder: 'The memory itself — self-contained, will matter months later', value: content, rows: 4, onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value) }),
+    h('input', { style: S.input, placeholder: 'Tags, comma-separated (optional)', value: tags, onChange: (e: ChangeEvent<HTMLInputElement>) => setTags(e.target.value) }),
     formError !== null ? h('div', { style: S.error }, formError) : null,
     h('div', null,
-      h('button', { style: S.button, type: 'submit', disabled: saving || title.trim() === '' || content.trim() === '' }, saving ? 'Saving…' : 'Save changes'),
-      ' ',
-      h('button', { style: S.button, type: 'button', onClick: props.onDone }, 'Cancel'),
+      h('button', { style: S.button, type: 'submit', disabled: saving || title.trim() === '' || content.trim() === '' }, saving ? 'Saving…' : editing ? 'Save changes' : 'Save memory'),
+      editing ? h('button', { style: { ...S.button, marginLeft: '8px' }, type: 'button', onClick: props.onDone }, 'Cancel') : null,
     ),
   )
 }
@@ -311,7 +305,7 @@ function UserSection(props: { info: ScopeInfo | undefined, query: string, onSave
       h('button', { style: S.smallButton, title: 'Add a user memory', onClick: () => { setAdding(!adding) } }, adding ? '×' : '+'),
     ),
     open ? h('div', null,
-      adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
+      adding ? h(MemoryForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
       info?.available !== true
         ? h('p', { style: S.muted }, 'Not available in this workspace')
         : h(GroupedEntries, { entries: info.entries ?? [], query, emptyText: 'No memories yet.', target, onSaved: props.onSaved }),
@@ -329,54 +323,14 @@ function WorkspaceSection(props: { ws: WorkspaceInfo, query: string, open: boole
         h('span', { style: { ...S.chevron, transform: open ? 'rotate(90deg)' : 'rotate(0deg)' } }, '▸'),
         h('strong', null, ws.name),
         ws.current ? h('code', { style: S.current }, 'current') : null,
+        ws.nested === true ? h('code', { style: S.current }, 'sub') : null,
         h('span', { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`),
       ),
       h('button', { style: S.smallButton, title: `Add a memory in ${ws.name}`, onClick: () => setAdding(!adding) }, adding ? '×' : '+'),
     ),
     open ? h('div', null,
-      adding ? h(AddForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
+      adding ? h(MemoryForm, { target, onDone: () => { setAdding(false); props.onSaved() } }) : null,
       h(GroupedEntries, { entries: ws.entries, query: props.query, emptyText: 'No memories in this workspace.', target, onSaved: props.onSaved }),
     ) : null,
-  )
-}
-
-function AddForm(props: { target: SaveTarget, onDone: () => void }): ReactElement {
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-  const [tags, setTags] = useState('')
-  const [formError, setFormError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  const submit = (e: FormEvent): void => {
-    e.preventDefault()
-    if (saving) return
-    setSaving(true)
-    setFormError(null)
-    fetch('/dsh-memory/api/v1/save', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        scope: props.target.scope,
-        workspace: props.target.workspace,
-        title, content,
-        tags: tags.split(',').map(t => t.trim()).filter(t => t !== ''),
-      }),
-    })
-      .then(async r => {
-        const data = r.json() as Promise<{ ok?: boolean, error?: string }>
-        if (!r.ok || (await data).ok !== true) throw new Error((await data as { error?: string }).error ?? `HTTP ${r.status}`)
-        props.onDone()
-      })
-      .catch(err => { setFormError(String(err)); setSaving(false) })
-  }
-
-  return h('form', { style: S.form, onSubmit: submit },
-    h('input', { style: S.input, placeholder: 'Title (max 60 chars)', value: title, maxLength: 60, autoFocus: true, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
-    h('textarea', { style: S.textarea, placeholder: 'The memory itself — self-contained, will matter months later', value: content, rows: 4, onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value) }),
-    h('input', { style: S.input, placeholder: 'Tags, comma-separated (optional)', value: tags, onChange: (e: ChangeEvent<HTMLInputElement>) => setTags(e.target.value) }),
-    formError !== null ? h('div', { style: S.error }, formError) : null,
-    h('div', null,
-      h('button', { style: S.button, type: 'submit', disabled: saving || title.trim() === '' || content.trim() === '' }, saving ? 'Saving…' : 'Save memory'),
-    ),
   )
 }

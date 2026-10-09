@@ -346,7 +346,7 @@ async function saveMemoryCore(input: SaveCoreInput): Promise<SaveCoreResult> {
  * silent: a failed ledger write never blocks activation.
  */
 async function recordWorkspace(): Promise<void> {
-  if (PROJECT_DIR === undefined) return
+  if (PROJECT_DIR === undefined || projectDirSource === 'cwd') return // cwd fallback is not a durable project boundary — never ledger it
   const root = path.resolve(PROJECT_DIR, '..', '..')
   const file = path.join(USER_DIR, 'workspaces.json')
   let parsed: unknown = []
@@ -542,6 +542,36 @@ async function handlePanelUpdate(ctx: Context, request: IncomingMessage, respons
 }
 
 /**
+ * Discover manually-created nested memory scopes (a .dsh/memory copied into a
+ * sub-folder — an intentional sub-project scope per the resolution chain).
+ * Restricted BFS from each known workspace root: depth-capped, skipping
+ * vendor/build directories, so the panel lists them without any registry.
+ */
+function findNestedScopes(root: string, maxDepth = 3): string[] {
+  const SKIP = new Set(['node_modules', '.git', '.svn', '.hg', 'dist', 'build', 'out', '.next', 'coverage', '.turbo', 'target', 'vendor'])
+  const found: string[] = []
+  let level: string[] = [root]
+  const seen = new Set<string>([root])
+  for (let depth = 0; depth < maxDepth && level.length > 0; depth++) {
+    const next: string[] = []
+    for (const dir of level) {
+      let names: string[] = []
+      try { names = readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) } catch { continue }
+      for (const name of names) {
+        if (SKIP.has(name) || name.startsWith('.') && name !== '.dsh') continue
+        const child = path.join(dir, name)
+        if (seen.has(child)) continue
+        seen.add(child)
+        if (existsSync(path.join(child, '.dsh', 'memory'))) { found.push(child); continue } // nested scope: don't descend into it further
+        next.push(child)
+      }
+    }
+    level = next
+  }
+  return found
+}
+
+/**
  * Panel read endpoint (P2.2): { scope, workspace?, id } → full memory text
  * for the edit form. The panel list only carries index-line excerpts; the
  * original content is fetched on demand, one memory at a time.
@@ -663,9 +693,27 @@ async function buildPanelPayload(ctx: Context): Promise<Record<string, unknown>>
     if (seen.has(root)) continue
     seen.add(root)
     const base = path.join(root, '.dsh', 'memory')
-    if (!existsSync(base)) continue // nothing ever saved in this workspace
-    const s = scopeStats(base)
-    projects.push({ root, name: path.basename(root) || root, current: root === currentRoot, stats: s.stats, entries: s.entries })
+    if (existsSync(base)) { // nothing ever saved in a workspace without it — but a nested scope inside may still exist
+      const s = scopeStats(base)
+      projects.push({ root, name: path.basename(root) || root, current: root === currentRoot, stats: s.stats, entries: s.entries })
+    }
+  }
+  // nested scopes: a sub-folder .dsh/memory may be discoverable from several
+  // roots (e.g. the cwd-fallback current root and its real parent workspace);
+  // name each after the CLOSEST parent — the shortest relative path wins.
+  const nestedNames = new Map<string, string>()
+  for (const root of ordered) {
+    for (const nested of findNestedScopes(root)) {
+      const rel = path.relative(root, nested) || path.basename(nested)
+      const existing = nestedNames.get(nested)
+      if (existing === undefined || rel.length < existing.length) nestedNames.set(nested, rel)
+    }
+  }
+  for (const [nestedRoot, name] of nestedNames) {
+    if (seen.has(nestedRoot)) continue
+    seen.add(nestedRoot)
+    const s = scopeStats(path.join(nestedRoot, '.dsh', 'memory'))
+    projects.push({ root: nestedRoot, name, nested: true, current: nestedRoot === currentRoot, stats: s.stats, entries: s.entries })
   }
   scopes.projects = projects
   return { scopes }

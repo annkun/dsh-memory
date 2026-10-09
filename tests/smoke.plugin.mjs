@@ -262,3 +262,26 @@ test('P2.2 read + update：编辑单条记忆端到端', async () => {
   const index = await fs.readFile(path.join(tmp, 'MEMORY.md'), 'utf8')
   assert.ok(index.includes('Edit me revised') && !index.includes('Edit me original'), '索引行应以新标题替换旧行')
 })
+
+test('P2.3 手动嵌套作用域：子文件夹里的 .dsh/memory 被发现并列出', async () => {
+  const fakeWs = path.join(tmp, 'fake-ws-nest')
+  const nested = path.join(fakeWs, 'sub', '.dsh', 'memory')
+  const { writeFileSync, mkdirSync } = await import('node:fs')
+  mkdirSync(path.join(nested, 'memories'), { recursive: true })
+  writeFileSync(path.join(tmp, 'workspaces.json'), JSON.stringify({ workspaces: [fakeWs] }), 'utf8') // ledger 在 USER_DIR(tmp) 下
+  // 直接在嵌套作用域落一条记忆（手写索引+文件，等价于用户从工程复制）
+  const id = '20261009-150000-copied-memory'
+  writeFileSync(path.join(nested, 'memories', `${id}.md`), '---\nid: ' + id + '\nscope: project\npath: \nsaved_at: 2026-10-09T15:00:00.000Z\ntags: \n---\n\n# Copied memory\n\nManually copied into a nested scope.\n')
+  writeFileSync(path.join(nested, 'MEMORY.md'), `# Memory Index\n\n- [Copied memory](memories/${id}.md) — Manually copied into a nested scope. (2026-10-09)\n`)
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/list')
+  let body = ''
+  const res = { writeHead: () => {}, end: s => { body = s } }
+  route.handler({}, res)
+  for (let i = 0; i < 50 && body === ''; i++) await new Promise(r => setTimeout(r, 10))
+  const data = JSON.parse(body)
+  const nestedGroup = (data.scopes.projects ?? []).find(p => p.root === path.join(fakeWs, 'sub'))
+  assert.ok(nestedGroup, `嵌套作用域应出现在列表: ${JSON.stringify((data.scopes.projects ?? []).map(p => p.root))}`)
+  assert.equal(nestedGroup.name, 'sub', '嵌套组名应为相对路径名')
+  assert.equal(nestedGroup.nested, true)
+  assert.ok(nestedGroup.entries.length >= 1, '嵌套作用域的条目应可见')
+})

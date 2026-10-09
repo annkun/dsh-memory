@@ -117,6 +117,12 @@ window.__ModuleLoader__.load({
 				background: "var(--bg-accent, #e0ecff)",
 				fontSize: "11px"
 			},
+			titleRow: {
+				display: "flex",
+				alignItems: "baseline",
+				gap: "4px",
+				flexWrap: "nowrap"
+			},
 			pathGroup: {
 				marginLeft: "18px",
 				borderLeft: "1px solid var(--border, #e5e5e5)",
@@ -269,9 +275,9 @@ window.__ModuleLoader__.load({
 				if (e.id !== void 0 && editing === e.id) return (0, react.createElement)("li", {
 					key: e.id,
 					style: S.item
-				}, (0, react.createElement)(EditForm, {
+				}, (0, react.createElement)(MemoryForm, {
 					target: props.target,
-					entry: e,
+					initial: e,
 					onDone: () => {
 						setEditing(null);
 						props.onSaved();
@@ -280,10 +286,13 @@ window.__ModuleLoader__.load({
 				return (0, react.createElement)("li", {
 					key: e.id ?? i,
 					style: S.item
-				}, (0, react.createElement)("div", { style: S.itemMain }, (0, react.createElement)("div", null, (0, react.createElement)("strong", null, e.title), e.tags.map((t) => (0, react.createElement)("code", {
+				}, (0, react.createElement)("div", { style: S.itemMain }, (0, react.createElement)("div", { style: S.titleRow }, (0, react.createElement)("strong", null, e.title), e.tags.map((t) => (0, react.createElement)("code", {
 					key: t,
 					style: S.tag
-				}, t))), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt)), (0, react.createElement)("div", null, e.id !== void 0 ? (0, react.createElement)("button", {
+				}, t)), (0, react.createElement)("span", { style: {
+					flex: "1",
+					minWidth: "8px"
+				} }), e.id !== void 0 ? (0, react.createElement)("button", {
 					style: S.smallButton,
 					title: "Edit this memory",
 					onClick: () => {
@@ -295,25 +304,28 @@ window.__ModuleLoader__.load({
 					title: "Delete this memory",
 					disabled: deleting === e.id,
 					onClick: () => del(e)
-				}, deleting === e.id ? "…" : "×") : null));
+				}, deleting === e.id ? "…" : "×") : null), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt)));
 			}));
 		}
 		/** Inline edit form: fetches the full text on demand, saves via /update. */
-		function EditForm(props) {
-			const [title, setTitle] = (0, react.useState)(props.entry.title);
+		/** One form, two modes — add (empty, /save) and edit (prefilled via /read, /update). Identical layout and size. */
+		function MemoryForm(props) {
+			const editing = props.initial !== void 0 && props.initial.id !== void 0;
+			const [title, setTitle] = (0, react.useState)(props.initial?.title ?? "");
 			const [content, setContent] = (0, react.useState)("");
-			const [tags, setTags] = (0, react.useState)(props.entry.tags.join(", "));
-			const [loading, setLoading] = (0, react.useState)(true);
+			const [tags, setTags] = (0, react.useState)(props.initial?.tags.join(", ") ?? "");
+			const [loading, setLoading] = (0, react.useState)(editing);
 			const [formError, setFormError] = (0, react.useState)(null);
 			const [saving, setSaving] = (0, react.useState)(false);
 			(0, react.useEffect)(() => {
+				if (!editing) return;
 				fetch("/dsh-memory/api/v1/read", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({
 						scope: props.target.scope,
 						workspace: props.target.workspace,
-						id: props.entry.id
+						id: props.initial.id
 					})
 				}).then(async (r) => {
 					const d = r.json();
@@ -321,9 +333,9 @@ window.__ModuleLoader__.load({
 					return d;
 				}).then((d) => {
 					setContent(d.content ?? "");
-					setLoading(false);
 				}).catch((err) => {
 					setFormError(String(err));
+				}).finally(() => {
 					setLoading(false);
 				});
 			}, []);
@@ -332,16 +344,23 @@ window.__ModuleLoader__.load({
 				if (saving) return;
 				setSaving(true);
 				setFormError(null);
-				fetch("/dsh-memory/api/v1/update", {
+				const tagList = tags.split(",").map((t) => t.trim()).filter((t) => t !== "");
+				fetch(editing ? "/dsh-memory/api/v1/update" : "/dsh-memory/api/v1/save", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
+					body: JSON.stringify(editing ? {
 						scope: props.target.scope,
 						workspace: props.target.workspace,
-						id: props.entry.id,
+						id: props.initial.id,
 						title,
 						content,
-						tags: tags.split(",").map((t) => t.trim()).filter((t) => t !== "")
+						tags: tagList
+					} : {
+						scope: props.target.scope,
+						workspace: props.target.workspace,
+						title,
+						content,
+						tags: tagList
 					})
 				}).then(async (r) => {
 					const d = r.json();
@@ -358,29 +377,34 @@ window.__ModuleLoader__.load({
 				onSubmit: submit
 			}, (0, react.createElement)("input", {
 				style: S.input,
-				placeholder: "Title",
+				placeholder: "Title (max 60 chars)",
 				value: title,
 				maxLength: 60,
+				autoFocus: true,
 				onChange: (e) => setTitle(e.target.value)
 			}), (0, react.createElement)("textarea", {
 				style: S.textarea,
+				placeholder: "The memory itself — self-contained, will matter months later",
 				value: content,
-				rows: 6,
+				rows: 4,
 				onChange: (e) => setContent(e.target.value)
 			}), (0, react.createElement)("input", {
 				style: S.input,
-				placeholder: "Tags, comma-separated",
+				placeholder: "Tags, comma-separated (optional)",
 				value: tags,
 				onChange: (e) => setTags(e.target.value)
 			}), formError !== null ? (0, react.createElement)("div", { style: S.error }, formError) : null, (0, react.createElement)("div", null, (0, react.createElement)("button", {
 				style: S.button,
 				type: "submit",
 				disabled: saving || title.trim() === "" || content.trim() === ""
-			}, saving ? "Saving…" : "Save changes"), " ", (0, react.createElement)("button", {
-				style: S.button,
+			}, saving ? "Saving…" : editing ? "Save changes" : "Save memory"), editing ? (0, react.createElement)("button", {
+				style: {
+					...S.button,
+					marginLeft: "8px"
+				},
 				type: "button",
 				onClick: props.onDone
-			}, "Cancel")));
+			}, "Cancel") : null));
 		}
 		function UserSection(props) {
 			const [adding, setAdding] = (0, react.useState)(false);
@@ -401,7 +425,7 @@ window.__ModuleLoader__.load({
 				onClick: () => {
 					setAdding(!adding);
 				}
-			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(AddForm, {
+			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(MemoryForm, {
 				target,
 				onDone: () => {
 					setAdding(false);
@@ -428,11 +452,11 @@ window.__ModuleLoader__.load({
 			}, (0, react.createElement)("span", { style: {
 				...S.chevron,
 				transform: open ? "rotate(90deg)" : "rotate(0deg)"
-			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.current ? (0, react.createElement)("code", { style: S.current }, "current") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), (0, react.createElement)("button", {
+			} }, "▸"), (0, react.createElement)("strong", null, ws.name), ws.current ? (0, react.createElement)("code", { style: S.current }, "current") : null, ws.nested === true ? (0, react.createElement)("code", { style: S.current }, "sub") : null, (0, react.createElement)("span", { style: S.muted }, `${ws.entries.length} memories · ${gauge(ws.stats)}`)), (0, react.createElement)("button", {
 				style: S.smallButton,
 				title: `Add a memory in ${ws.name}`,
 				onClick: () => setAdding(!adding)
-			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(AddForm, {
+			}, adding ? "×" : "+")), open ? (0, react.createElement)("div", null, adding ? (0, react.createElement)(MemoryForm, {
 				target,
 				onDone: () => {
 					setAdding(false);
@@ -445,63 +469,6 @@ window.__ModuleLoader__.load({
 				target,
 				onSaved: props.onSaved
 			})) : null);
-		}
-		function AddForm(props) {
-			const [title, setTitle] = (0, react.useState)("");
-			const [content, setContent] = (0, react.useState)("");
-			const [tags, setTags] = (0, react.useState)("");
-			const [formError, setFormError] = (0, react.useState)(null);
-			const [saving, setSaving] = (0, react.useState)(false);
-			const submit = (e) => {
-				e.preventDefault();
-				if (saving) return;
-				setSaving(true);
-				setFormError(null);
-				fetch("/dsh-memory/api/v1/save", {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						scope: props.target.scope,
-						workspace: props.target.workspace,
-						title,
-						content,
-						tags: tags.split(",").map((t) => t.trim()).filter((t) => t !== "")
-					})
-				}).then(async (r) => {
-					const data = r.json();
-					if (!r.ok || (await data).ok !== true) throw new Error((await data).error ?? `HTTP ${r.status}`);
-					props.onDone();
-				}).catch((err) => {
-					setFormError(String(err));
-					setSaving(false);
-				});
-			};
-			return (0, react.createElement)("form", {
-				style: S.form,
-				onSubmit: submit
-			}, (0, react.createElement)("input", {
-				style: S.input,
-				placeholder: "Title (max 60 chars)",
-				value: title,
-				maxLength: 60,
-				autoFocus: true,
-				onChange: (e) => setTitle(e.target.value)
-			}), (0, react.createElement)("textarea", {
-				style: S.textarea,
-				placeholder: "The memory itself — self-contained, will matter months later",
-				value: content,
-				rows: 4,
-				onChange: (e) => setContent(e.target.value)
-			}), (0, react.createElement)("input", {
-				style: S.input,
-				placeholder: "Tags, comma-separated (optional)",
-				value: tags,
-				onChange: (e) => setTags(e.target.value)
-			}), formError !== null ? (0, react.createElement)("div", { style: S.error }, formError) : null, (0, react.createElement)("div", null, (0, react.createElement)("button", {
-				style: S.button,
-				type: "submit",
-				disabled: saving || title.trim() === "" || content.trim() === ""
-			}, saving ? "Saving…" : "Save memory")));
 		}
 		//#endregion
 		exports.apply = apply;
