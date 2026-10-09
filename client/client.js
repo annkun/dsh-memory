@@ -36,8 +36,8 @@ window.__ModuleLoader__.load({
 			},
 			list: {
 				listStyle: "none",
-				margin: 0,
-				padding: 0
+				margin: "0",
+				padding: "0"
 			},
 			item: {
 				padding: "8px 0",

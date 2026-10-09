@@ -62,7 +62,7 @@
     "@types/react": "^18.3.12"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && npm run build:client",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && npm run build:client",
     "test": "node --test tests/basic.test.mjs tests/smoke.plugin.mjs tests/detection.test.mjs tests/pathedge.test.mjs tests/atomic.test.mjs",
     "build:client": "tsdown"
   },

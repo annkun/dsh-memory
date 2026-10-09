@@ -46,7 +46,7 @@ const S: Record<string, Partial<CSSStyleDeclaration>> = {
   section: { marginBottom: '20px' },
   muted: { color: 'var(--fg-muted, #888)', fontSize: '12px' },
   input: { width: '100%', maxWidth: '420px', padding: '6px 10px', marginBottom: '12px', boxSizing: 'border-box' },
-  list: { listStyle: 'none', margin: 0, padding: 0 },
+  list: { listStyle: 'none', margin: '0', padding: '0' },
   item: { padding: '8px 0', borderBottom: '1px solid var(--border, #e5e5e5)' },
   tag: { margin: '0 4px', padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-muted, #f2f2f2)', fontSize: '11px' },
 }

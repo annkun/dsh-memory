@@ -259,6 +259,177 @@ async function pruneMemories(base: string): Promise<number> {
   return Math.max(excess, 0)
 }
 
+/**
+ * Atomic file write (P0 pattern, now shared): sibling tmp + rename, so a crash
+ * mid-write can never leave a half-written file. Windows rename over a
+ * transiently-open target can EPERM — retried with a short backoff, and the
+ * tmp is always cleaned on terminal failure.
+ */
+async function atomicWriteFile(file: string, data: string): Promise<void> {
+  const tmp = `${file}.${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.tmp`
+  await fs.writeFile(tmp, data, 'utf8')
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(tmp, file)
+      return
+    } catch (e) {
+      const code = String((e as NodeJS.ErrnoException).code ?? '')
+      if (attempt >= 2 || (code !== 'EPERM' && code !== 'EACCES')) {
+        await fs.rm(tmp, { force: true }).catch(() => {})
+        throw e
+      }
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }
+}
+
+interface SaveCoreInput {
+  scope: 'user' | 'project'
+  base: string
+  title: string
+  content: string
+  tags?: string[]
+  memPathArg?: string
+}
+
+type SaveCoreResult =
+  | { ok: true, saved: true, id: string, scope: string, file: string, updated: boolean, indexEntries: number, prunedMemories: number, notice: string }
+  | { ok: false, error: string }
+
+/**
+ * Shared save core (P2): the model tool and the panel POST write through the
+ * exact same path — dedupe-and-update, guard caps, atomic writes. The base
+ * directory is supplied by the caller, so the panel can target any known
+ * workspace while the tool keeps using the detected scopes.
+ */
+async function saveMemoryCore(input: SaveCoreInput): Promise<SaveCoreResult> {
+  const { scope, base, title, content } = input
+  try {
+    const now = new Date()
+    const slug = slugify(title)
+    const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
+    await ensureDirs(base)
+    const dir = memoryDirOf(base)
+    // Claude-Code write rule — dedupe-and-update: same title slug updates in
+    // place instead of appending a near-duplicate.
+    const existing = (await fs.readdir(dir).catch(() => [] as string[])).find(f => f.endsWith(`-${slug}.md`))
+    const id = existing === undefined ? `${timestamp(now)}-${slug}` : existing.replace(/\.md$/, '')
+    const updated = existing !== undefined
+    const file = path.join(dir, `${id}.md`)
+    let memPath = (input.memPathArg?.trim() ?? '').replace(/[^a-zA-Z0-9\u4e00-\u9fff/_-]+/g, '-').replace(/^-+|-+$/g, '')
+    if (memPath === '' && scope === 'project' && base === PROJECT_DIR) {
+      const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
+      const cwd = process.cwd()
+      if (cwd.startsWith(projRoot + path.sep)) memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
+    }
+    const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(input.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
+    await atomicWriteFile(file, header + content + '\n')
+    const tagSuffix = input.tags?.length ? ` \`${input.tags.join('` `')}\`` : ''
+    const pathTag = memPath !== '' ? ` [${memPath}]` : ''
+    const indexLine = `- [${indexSafe(title)}](memories/${id}.md) — ${indexSafe(safeSlice(content.split('\n')[0] ?? '', 80))} (${date})${pathTag}${tagSuffix}`
+    const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
+    lines.unshift(indexLine)
+    const kept = await writeIndexGuarded(base, lines)
+    const pruned = updated ? 0 : await pruneMemories(base)
+    return {
+      ok: true, saved: true, id, scope, file, updated, indexEntries: kept, prunedMemories: pruned,
+      notice: `${updated ? `Updated existing ${scope} memory ${id}` : `Saved 1 ${scope} memory`} (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
+    }
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+/**
+ * Record the active project root in the user-scope workspace ledger so the
+ * panel can enumerate workspaces without any host service. Best-effort and
+ * silent: a failed ledger write never blocks activation.
+ */
+async function recordWorkspace(): Promise<void> {
+  if (PROJECT_DIR === undefined) return
+  const root = path.resolve(PROJECT_DIR, '..', '..')
+  const file = path.join(USER_DIR, 'workspaces.json')
+  let parsed: unknown = []
+  try { parsed = JSON.parse(readFileSync(file, 'utf8')).workspaces } catch { /* absent/corrupt → fresh */ }
+  const list = (Array.isArray(parsed) ? parsed : []).filter((w): w is string => typeof w === 'string' && path.isAbsolute(w))
+  if (list.includes(root)) return
+  list.unshift(root)
+  await atomicWriteFile(file, JSON.stringify({ workspaces: list.slice(0, 50) }, null, 2) + '\n').catch(() => {})
+}
+
+/**
+ * Every workspace the panel may show or write: the host workspace registry
+ * (authoritative, when the service exists) union the user-scope ledger
+ * (self-contained fallback). Both best-effort; unknown shapes are skipped.
+ */
+async function knownWorkspaces(ctx: Context): Promise<string[]> {
+  const roots = new Set<string>()
+  try {
+    const registry = (ctx as unknown as { workspaceRegistry?: { list(): Promise<unknown[]> } }).workspaceRegistry
+    if (registry !== undefined && typeof registry.list === 'function') {
+      for (const entry of await registry.list()) {
+        const e = entry as Record<string, unknown>
+        const raw = typeof e.directory === 'function' ? String(e.directory()) : e.directory
+        if (typeof raw === 'string' && path.isAbsolute(raw)) roots.add(path.resolve(raw))
+      }
+    }
+  } catch { /* best-effort */ }
+  try {
+    const ledger = JSON.parse(readFileSync(path.join(USER_DIR, 'workspaces.json'), 'utf8')).workspaces
+    for (const w of Array.isArray(ledger) ? ledger : []) {
+      if (typeof w === 'string' && path.isAbsolute(w)) roots.add(path.resolve(w))
+    }
+  } catch { /* absent → skip */ }
+  return [...roots]
+}
+
+/**
+ * Panel save endpoint (P2): { scope, workspace?, title, content, tags? }.
+ * A project save may target any KNOWN workspace (registry or ledger) — an
+ * arbitrary path is rejected, so the browser can never use this API as a
+ * general-purpose file writer.
+ */
+async function handlePanelSave(ctx: Context, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const reply = (status: number, body: unknown): void => {
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify(body))
+  }
+  try {
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of request) {
+      size += (chunk as Buffer).length
+      if (size > 1_000_000) { reply(413, { ok: false, error: 'body too large' }); return }
+      chunks.push(chunk as Buffer)
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { scope?: unknown, workspace?: unknown, title?: unknown, content?: unknown, tags?: unknown }
+    const title = safeSlice(String(body.title ?? '').trim(), 60)
+    const content = safeSlice(String(body.content ?? '').trim(), MAX_CONTENT_CHARS)
+    const tags = (Array.isArray(body.tags) ? body.tags : []).filter((t): t is string => typeof t === 'string').slice(0, 10)
+    if (title === '' || content === '') { reply(400, { ok: false, error: 'title and content must be non-empty' }); return }
+    let base: string | undefined
+    if (body.scope === 'user') {
+      base = scopeDir('user')
+    } else if (body.scope === 'project') {
+      if (body.workspace !== undefined) {
+        const root = path.resolve(String(body.workspace))
+        if (!(await knownWorkspaces(ctx)).includes(root)) { reply(400, { ok: false, error: 'unknown workspace' }); return }
+        base = path.join(root, '.dsh', 'memory')
+      } else {
+        base = PROJECT_DIR
+      }
+    } else {
+      reply(400, { ok: false, error: 'scope must be "user" or "project"' }); return
+    }
+    if (base === undefined) { reply(400, { ok: false, error: 'target scope unavailable' }); return }
+    const r = await saveMemoryCore({ scope: body.scope, base, title, content, tags })
+    if (!r.ok) { reply(500, { ok: false, error: r.error }); return }
+    reply(200, r)
+  } catch (e) {
+    reply(400, { ok: false, error: String((e as Error)?.message ?? e) })
+  }
+}
+
 function excerpt(text: string, query: string, radius = 60): string {
   const at = text.toLowerCase().indexOf(query.toLowerCase())
   if (at < 0) return text.slice(0, radius * 2).trim()
@@ -292,29 +463,53 @@ function parseEntryLine(line: string): Record<string, unknown> {
   return { id: m[2], title: m[1]!, date: dateM?.[1] ?? '', path: pathM?.[1] ?? '', tags, excerpt }
 }
 
-/** Assemble the read-only panel payload for both scopes (P1 visual editor data bridge). */
-function buildPanelPayload(): Record<string, unknown> {
-  const scopes: Record<string, unknown> = {}
-  for (const scope of activeScopes()) {
-    const base = scopeDir(scope)
-    if (base === undefined) { scopes[scope] = { available: false }; continue }
-    let lines: string[] = []
-    try { lines = parseIndexLines(readFileSync(indexFileOf(base), 'utf8'), base) } catch { lines = [] } // orphan-filtered, sync (panel snapshot)
-    let indexBytes = 0
-    try { indexBytes = statSync(indexFileOf(base)).size } catch { indexBytes = 0 }
-    const memDir = memoryDirOf(base)
-    let memoryCount = 0
-    try { memoryCount = readdirSync(memDir).filter(f => f.endsWith('.md')).length } catch { memoryCount = 0 }
-    scopes[scope] = {
-      available: true,
-      stats: {
-        entries: lines.length, maxEntries: MAX_INDEX_LINES,
-        indexBytes, maxBytes: MAX_INDEX_BYTES,
-        memoryFiles: memoryCount, maxMemories: MAX_MEMORIES,
-      },
-      entries: lines.map(parseEntryLine),
-    }
+/** Per-scope stats + entries snapshot (sync; panel GET). */
+function scopeStats(base: string): { stats: Record<string, number>, entries: Array<Record<string, unknown>> } {
+  let lines: string[] = []
+  try { lines = parseIndexLines(readFileSync(indexFileOf(base), 'utf8'), base) } catch { lines = [] } // orphan-filtered
+  let indexBytes = 0
+  try { indexBytes = statSync(indexFileOf(base)).size } catch { indexBytes = 0 }
+  let memoryFiles = 0
+  try { memoryFiles = readdirSync(memoryDirOf(base)).filter(f => f.endsWith('.md')).length } catch { memoryFiles = 0 }
+  return {
+    stats: {
+      entries: lines.length, maxEntries: MAX_INDEX_LINES,
+      indexBytes, maxBytes: MAX_INDEX_BYTES,
+      memoryFiles, maxMemories: MAX_MEMORIES,
+    },
+    entries: lines.map(parseEntryLine),
   }
+}
+
+/**
+ * Assemble the panel payload (P2): the user scope plus one expandable group
+ * per known workspace (host registry union the user-scope ledger). Workspaces
+ * without a .dsh/memory directory — nothing ever saved there — are skipped;
+ * the current workspace sorts first and is marked current.
+ */
+async function buildPanelPayload(ctx: Context): Promise<Record<string, unknown>> {
+  const scopes: Record<string, unknown> = {}
+  const userBase = scopeDir('user')
+  if (userBase === undefined) {
+    scopes.user = { available: false }
+  } else {
+    const s = scopeStats(userBase)
+    scopes.user = { available: true, stats: s.stats, entries: s.entries }
+  }
+  const currentRoot = PROJECT_DIR === undefined ? undefined : path.resolve(PROJECT_DIR, '..', '..')
+  const workspaces = await knownWorkspaces(ctx)
+  const ordered = currentRoot !== undefined ? [currentRoot, ...workspaces.filter(w => w !== currentRoot)] : workspaces
+  const seen = new Set<string>()
+  const projects: Array<Record<string, unknown>> = []
+  for (const root of ordered) {
+    if (seen.has(root)) continue
+    seen.add(root)
+    const base = path.join(root, '.dsh', 'memory')
+    if (!existsSync(base)) continue // nothing ever saved in this workspace
+    const s = scopeStats(base)
+    projects.push({ root, name: path.basename(root) || root, current: root === currentRoot, stats: s.stats, entries: s.entries })
+  }
+  scopes.projects = projects
   return { scopes }
 }
 
@@ -449,47 +644,8 @@ export async function apply(ctx: Context): Promise<void> {
       if (scope === undefined) scope = PROJECT_DIR === undefined ? 'user' : 'project'
       const base = scopeDir(scope)
       if (base === undefined) return simpleError('no_project_scope', 'No git repository detected here; only the "user" scope is available.')
-      const now = new Date()
-      const slug = slugify(title)
-      const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
-      await ensureDirs(base)
-      const dir = memoryDirOf(base)
-      // Claude-Code write rule — dedupe-and-update: an existing memory with the
-      // same title slug is updated in place (content replaced, saved_at
-      // refreshed, index line re-dated and moved to top) instead of appending
-      // a near-duplicate.
-      const existing = (await fs.readdir(dir).catch(() => [] as string[]))
-        .find(f => f.endsWith(`-${slug}.md`))
-      const id = existing === undefined ? `${timestamp(now)}-${slug}` : existing.replace(/\.md$/, '')
-      const updated = existing !== undefined
-      const file = path.join(dir, `${id}.md`)
-      // auto-record sub-directory path (relative to project root) — CLAUDE.md-style:
-      // untagged (root-level) memories always inject; path-tagged memories only
-      // surface when the session works in that area
-      let memPath = (args.path?.trim() ?? '').replace(/[^a-zA-Z0-9\u4e00-\u9fff/_-]+/g, '-').replace(/^-+|-+$/g, '')
-      if (memPath === '' && scope === 'project' && PROJECT_DIR !== undefined) {
-        const projRoot = path.resolve(PROJECT_DIR, '..', '..') // PROJECT_DIR = <root>/.dsh/memory
-        const cwd = process.cwd()
-        if (cwd.startsWith(projRoot + path.sep)) {
-          memPath = path.relative(projRoot, cwd).split(path.sep).join('/')
-        }
-      }
-      const header = `---\nid: ${id}\nscope: ${scope}\npath: ${memPath}\nsaved_at: ${now.toISOString()}\ntags: ${(args.tags ?? []).join(', ')}\n---\n\n# ${title}\n\n`
-      await fs.writeFile(file, header + content + '\n', 'utf8')
-      const tagSuffix = args.tags?.length ? ` \`${args.tags.join('\` \`')}\`` : ''
-      // dated index line: lets the model reason fresh-vs-stale (Claude Code
-      // ships last-modified timestamps on memory files for exactly this)
-      const pathTag = memPath !== '' ? ` [${memPath}]` : ''
-      const indexLine = `- [${indexSafe(title)}](memories/${id}.md) — ${indexSafe(safeSlice(content.split('\n')[0] ?? '', 80))} (${date})${pathTag}${tagSuffix}`
-      const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
-      lines.unshift(indexLine)
-      const kept = await writeIndexGuarded(base, lines)
-      const pruned = updated ? 0 : await pruneMemories(base)
-      return {
-        id, scope, file, saved: true, updated,
-        indexEntries: kept, prunedMemories: pruned,
-        notice: `${updated ? `Updated existing ${scope} memory ${id}` : `Saved 1 ${scope} memory`} (${scope === 'project' ? 'team-shared, commit it to git' : 'personal, cross-project'}). Index now lists ${kept} entries.`,
-      }
+      const r = await saveMemoryCore({ scope, base, title, content, tags: args.tags, memPathArg: args.path })
+      return r.ok ? r : simpleError('save_failed', r.error)
     },
     presentCall: args => ({ card: 'generic' as const, title: `Save memory: ${args.title}` }),
   }))
@@ -614,6 +770,7 @@ export async function apply(ctx: Context): Promise<void> {
   // P1 visual editor data bridge: a read-only JSON API served by the host
   // webServer. Runtime-injected (NOT a top-level inject) so hosts without a
   // web server keep every tool working — the panel just has no data source.
+  void recordWorkspace()
   if (typeof ctx.inject !== 'function') return // minimal hosts/test stubs without runtime inject: tools keep working, panel has no data source
   ctx.inject(['webServer'], (webCtx: Context) => {
     const webServer = (webCtx as unknown as { webServer?: WebServerRouteService }).webServer
@@ -622,8 +779,20 @@ export async function apply(ctx: Context): Promise<void> {
       method: 'GET',
       path: '/dsh-memory/api/v1/list',
       handler: (_request, response) => {
-        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-        response.end(JSON.stringify(buildPanelPayload()))
+        void buildPanelPayload(ctx).then(payload => {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(JSON.stringify(payload))
+        }).catch(() => {
+          response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(JSON.stringify({ error: 'panel payload failed' }))
+        })
+      },
+    })
+    webServer.register({
+      method: 'POST',
+      path: '/dsh-memory/api/v1/save',
+      handler: (request, response) => {
+        void handlePanelSave(ctx, request, response)
       },
     })
   })

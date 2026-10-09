@@ -137,13 +137,59 @@ test('P1 数据桥：GET /dsh-memory/api/v1/list 返回双域 JSON', async () =>
   assert.equal(route.method, 'GET')
   let body = ''
   const res = { writeHead: () => {}, end: s => { body = s } }
-  await route.handler({}, res)
+  route.handler({}, res)
+  await new Promise(resolve => setImmediate(resolve)) // GET handler resolves async
   const data = JSON.parse(body)
   assert.ok(data.scopes && typeof data.scopes.user === 'object', '应有 user 域')
-  assert.ok(data.scopes.project, '应有 project 域')
-  const p = data.scopes.project
-  assert.ok(p.available === true && Array.isArray(p.entries) && p.entries.length >= 1, 'project 域应有已存记忆')
+  assert.ok(Array.isArray(data.scopes.projects), 'P2: projects 应为工作区数组')
+  assert.ok(data.scopes.projects.length >= 1, '当前工作区应在列表中')
+  const p = data.scopes.projects[0]
+  assert.ok(p.current === true && Array.isArray(p.entries) && p.entries.length >= 1, '当前工作区应有已存记忆')
   assert.ok(typeof p.stats.indexBytes === 'number' && p.stats.maxBytes === 25600, '护栏统计应含字节数')
   const entry = p.entries[0]
   assert.ok(entry.title && entry.date, '条目应解析出 title/date')
+})
+
+const postSave = async body => {
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/save' && r.method === 'POST')
+  assert.ok(route, 'POST 路由应已注册')
+  const req = { async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }
+  let status = 0, resBody = ''
+  const res = { writeHead: s => { status = s }, end: s => { resBody = s } }
+  await route.handler(req, res)
+  for (let i = 0; i < 50 && resBody === ''; i++) await new Promise(r => setTimeout(r, 10))
+  return { status, data: resBody === '' ? null : JSON.parse(resBody) }
+}
+
+test('P2 POST /save：user 域添加 → 落盘 + 索引 + ok 响应', async () => {
+  const { status, data } = await postSave({ scope: 'user', title: 'Panel-added memory', content: 'Written from the settings panel.', tags: ['panel'] })
+  assert.equal(status, 200)
+  assert.ok(data.ok === true && data.saved === true, '应返回 ok+saved')
+  assert.match(data.file, /panel-added-memory/, '文件名应含 slug')
+  const index = await fs.readFile(path.join(tmp, 'MEMORY.md'), 'utf8')
+  assert.match(index, /Panel-added memory/, '索引应含新条目')
+})
+
+test('P2 POST /save：拒绝未知 workspace（防任意路径写）', async () => {
+  const { status, data } = await postSave({ scope: 'project', workspace: '/definitely/not/a/known/workspace', title: 'x', content: 'y' })
+  assert.equal(status, 400)
+  assert.match(data.error, /unknown workspace/)
+})
+
+test('P2 枚举：POST 写已知工作区 + 无记忆工作区被过滤', async () => {
+  const fakeWs = path.join(tmp, 'fake-ws')
+  const ledger = path.join(tmp, 'workspaces.json')
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(ledger, JSON.stringify({ workspaces: [fakeWs, '/tmp/empty-ws-p2-test'] }), 'utf8')
+  const saved = await postSave({ scope: 'project', workspace: fakeWs, title: 'Cross-ws memory', content: 'Saved into another workspace from the panel.' })
+  assert.equal(saved.status, 200, '已知工作区应可写')
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/list')
+  let body = ''
+  const res = { writeHead: () => {}, end: s => { body = s } }
+  route.handler({}, res)
+  for (let i = 0; i < 50 && body === ''; i++) await new Promise(r => setTimeout(r, 10))
+  const data = JSON.parse(body)
+  const roots = data.scopes.projects.map(p => p.root)
+  assert.ok(roots.includes(fakeWs), '已写入的假工作区应在列表')
+  assert.ok(!roots.includes('/tmp/empty-ws-p2-test'), '无记忆工作区应被过滤')
 })
