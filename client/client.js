@@ -236,10 +236,13 @@ window.__ModuleLoader__.load({
 		}
 		function EntryList(props) {
 			const [deleting, setDeleting] = (0, react.useState)(null);
+			const [editing, setEditing] = (0, react.useState)(null);
+			const [rowError, setRowError] = (0, react.useState)(null);
 			const del = (e) => {
 				if (deleting !== null || e.id === void 0) return;
 				if (!window.confirm(`Delete "${e.title}"?`)) return;
 				setDeleting(e.id);
+				setRowError(null);
 				fetch("/dsh-memory/api/v1/delete", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
@@ -252,23 +255,132 @@ window.__ModuleLoader__.load({
 					const d = r.json();
 					if (!r.ok || (await d).ok !== true) throw new Error((await d).error ?? `HTTP ${r.status}`);
 					props.onSaved();
-				}).catch(() => {}).finally(() => {
+				}).catch((err) => {
+					setRowError(`Delete failed: ${String(err)}`);
+				}).finally(() => {
 					setDeleting(null);
 				});
 			};
 			if (props.entries.length === 0) return (0, react.createElement)("span");
-			return (0, react.createElement)("ul", { style: S.list }, props.entries.map((e, i) => (0, react.createElement)("li", {
-				key: e.id ?? i,
+			return (0, react.createElement)("ul", { style: S.list }, rowError !== null ? (0, react.createElement)("li", {
+				key: "error",
 				style: S.item
-			}, (0, react.createElement)("div", { style: S.itemMain }, (0, react.createElement)("div", null, (0, react.createElement)("strong", null, e.title), e.tags.map((t) => (0, react.createElement)("code", {
-				key: t,
-				style: S.tag
-			}, t))), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt)), e.id !== void 0 ? (0, react.createElement)("button", {
-				style: S.smallButton,
-				title: "Delete this memory",
-				disabled: deleting === e.id,
-				onClick: () => del(e)
-			}, deleting === e.id ? "…" : "×") : null)));
+			}, (0, react.createElement)("div", { style: S.error }, rowError)) : null, props.entries.map((e, i) => {
+				if (e.id !== void 0 && editing === e.id) return (0, react.createElement)("li", {
+					key: e.id,
+					style: S.item
+				}, (0, react.createElement)(EditForm, {
+					target: props.target,
+					entry: e,
+					onDone: () => {
+						setEditing(null);
+						props.onSaved();
+					}
+				}));
+				return (0, react.createElement)("li", {
+					key: e.id ?? i,
+					style: S.item
+				}, (0, react.createElement)("div", { style: S.itemMain }, (0, react.createElement)("div", null, (0, react.createElement)("strong", null, e.title), e.tags.map((t) => (0, react.createElement)("code", {
+					key: t,
+					style: S.tag
+				}, t))), (0, react.createElement)("div", { style: S.muted }, e.date !== "" ? `${e.date} — ` : "", e.excerpt)), (0, react.createElement)("div", null, e.id !== void 0 ? (0, react.createElement)("button", {
+					style: S.smallButton,
+					title: "Edit this memory",
+					onClick: () => {
+						setEditing(e.id);
+						setRowError(null);
+					}
+				}, "✎") : null, e.id !== void 0 ? (0, react.createElement)("button", {
+					style: S.smallButton,
+					title: "Delete this memory",
+					disabled: deleting === e.id,
+					onClick: () => del(e)
+				}, deleting === e.id ? "…" : "×") : null));
+			}));
+		}
+		/** Inline edit form: fetches the full text on demand, saves via /update. */
+		function EditForm(props) {
+			const [title, setTitle] = (0, react.useState)(props.entry.title);
+			const [content, setContent] = (0, react.useState)("");
+			const [tags, setTags] = (0, react.useState)(props.entry.tags.join(", "));
+			const [loading, setLoading] = (0, react.useState)(true);
+			const [formError, setFormError] = (0, react.useState)(null);
+			const [saving, setSaving] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				fetch("/dsh-memory/api/v1/read", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						scope: props.target.scope,
+						workspace: props.target.workspace,
+						id: props.entry.id
+					})
+				}).then(async (r) => {
+					const d = r.json();
+					if (!r.ok || (await d).ok !== true) throw new Error((await d).error ?? `HTTP ${r.status}`);
+					return d;
+				}).then((d) => {
+					setContent(d.content ?? "");
+					setLoading(false);
+				}).catch((err) => {
+					setFormError(String(err));
+					setLoading(false);
+				});
+			}, []);
+			const submit = (e) => {
+				e.preventDefault();
+				if (saving) return;
+				setSaving(true);
+				setFormError(null);
+				fetch("/dsh-memory/api/v1/update", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						scope: props.target.scope,
+						workspace: props.target.workspace,
+						id: props.entry.id,
+						title,
+						content,
+						tags: tags.split(",").map((t) => t.trim()).filter((t) => t !== "")
+					})
+				}).then(async (r) => {
+					const d = r.json();
+					if (!r.ok || (await d).ok !== true) throw new Error((await d).error ?? `HTTP ${r.status}`);
+					props.onDone();
+				}).catch((err) => {
+					setFormError(String(err));
+					setSaving(false);
+				});
+			};
+			if (loading && formError === null) return (0, react.createElement)("div", { style: S.form }, "Loading…");
+			return (0, react.createElement)("form", {
+				style: S.form,
+				onSubmit: submit
+			}, (0, react.createElement)("input", {
+				style: S.input,
+				placeholder: "Title",
+				value: title,
+				maxLength: 60,
+				onChange: (e) => setTitle(e.target.value)
+			}), (0, react.createElement)("textarea", {
+				style: S.textarea,
+				value: content,
+				rows: 6,
+				onChange: (e) => setContent(e.target.value)
+			}), (0, react.createElement)("input", {
+				style: S.input,
+				placeholder: "Tags, comma-separated",
+				value: tags,
+				onChange: (e) => setTags(e.target.value)
+			}), formError !== null ? (0, react.createElement)("div", { style: S.error }, formError) : null, (0, react.createElement)("div", null, (0, react.createElement)("button", {
+				style: S.button,
+				type: "submit",
+				disabled: saving || title.trim() === "" || content.trim() === ""
+			}, saving ? "Saving…" : "Save changes"), " ", (0, react.createElement)("button", {
+				style: S.button,
+				type: "button",
+				onClick: props.onDone
+			}, "Cancel")));
 		}
 		function UserSection(props) {
 			const [adding, setAdding] = (0, react.useState)(false);

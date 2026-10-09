@@ -182,10 +182,13 @@ function GroupedEntries(props: { entries: PanelEntry[], query: string, emptyText
 
 function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTarget, onSaved: () => void }): ReactElement {
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<string | null>(null)
   const del = (e: PanelEntry): void => {
     if (deleting !== null || e.id === undefined) return
     if (!window.confirm(`Delete "${e.title}"?`)) return
     setDeleting(e.id)
+    setRowError(null)
     fetch('/dsh-memory/api/v1/delete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -196,25 +199,101 @@ function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTa
         if (!r.ok || (await d).ok !== true) throw new Error((await d as { error?: string }).error ?? `HTTP ${r.status}`)
         props.onSaved()
       })
-      .catch(() => { /* keep the entry; user can retry */ })
+      .catch(err => { setRowError(`Delete failed: ${String(err)}`) }) // surface, never swallow
       .finally(() => { setDeleting(null) })
   }
   if (props.entries.length === 0) return h('span')
-  return h('ul', { style: S.list }, props.entries.map((e, i) => h('li', { key: e.id ?? i, style: S.item },
-    h('div', { style: S.itemMain },
-      h('div', null,
-        h('strong', null, e.title),
-        e.tags.map(t => h('code', { key: t, style: S.tag }, t))),
-      h('div', { style: S.muted }, e.date !== '' ? `${e.date} — ` : '', e.excerpt),
+  return h('ul', { style: S.list },
+    rowError !== null ? h('li', { key: 'error', style: S.item }, h('div', { style: S.error }, rowError)) : null,
+    props.entries.map((e, i) => {
+      if (e.id !== undefined && editing === e.id) {
+        return h('li', { key: e.id, style: S.item },
+          h(EditForm, { target: props.target, entry: e, onDone: () => { setEditing(null); props.onSaved() } }))
+      }
+      return h('li', { key: e.id ?? i, style: S.item },
+        h('div', { style: S.itemMain },
+          h('div', null,
+            h('strong', null, e.title),
+            e.tags.map(t => h('code', { key: t, style: S.tag }, t))),
+          h('div', { style: S.muted }, e.date !== '' ? `${e.date} — ` : '', e.excerpt),
+        ),
+        h('div', null,
+          e.id !== undefined
+            ? h('button', {
+                style: S.smallButton, title: 'Edit this memory',
+                onClick: () => { setEditing(e.id!); setRowError(null) },
+              }, '✎')
+            : null,
+          e.id !== undefined
+            ? h('button', {
+                style: S.smallButton, title: 'Delete this memory',
+                disabled: deleting === e.id,
+                onClick: () => del(e),
+              }, deleting === e.id ? '…' : '×')
+            : null,
+        ),
+      )
+    }),
+  )
+}
+
+/** Inline edit form: fetches the full text on demand, saves via /update. */
+function EditForm(props: { target: SaveTarget, entry: PanelEntry, onDone: () => void }): ReactElement {
+  const [title, setTitle] = useState(props.entry.title)
+  const [content, setContent] = useState('')
+  const [tags, setTags] = useState(props.entry.tags.join(', '))
+  const [loading, setLoading] = useState(true)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    fetch('/dsh-memory/api/v1/read', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: props.target.scope, workspace: props.target.workspace, id: props.entry.id }),
+    })
+      .then(async r => {
+        const d = r.json() as Promise<{ ok?: boolean, error?: string, content?: string }>
+        if (!r.ok || (await d).ok !== true) throw new Error((await d as { error?: string }).error ?? `HTTP ${r.status}`)
+        return d
+      })
+      .then(d => { setContent(d.content ?? ''); setLoading(false) })
+      .catch(err => { setFormError(String(err)); setLoading(false) })
+  }, [])
+  const submit = (e: FormEvent): void => {
+    e.preventDefault()
+    if (saving) return
+    setSaving(true)
+    setFormError(null)
+    fetch('/dsh-memory/api/v1/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        scope: props.target.scope,
+        workspace: props.target.workspace,
+        id: props.entry.id,
+        title, content,
+        tags: tags.split(',').map(t => t.trim()).filter(t => t !== ''),
+      }),
+    })
+      .then(async r => {
+        const d = r.json() as Promise<{ ok?: boolean, error?: string }>
+        if (!r.ok || (await d).ok !== true) throw new Error((await d as { error?: string }).error ?? `HTTP ${r.status}`)
+        props.onDone()
+      })
+      .catch(err => { setFormError(String(err)); setSaving(false) })
+  }
+  if (loading && formError === null) return h('div', { style: S.form }, 'Loading…')
+  return h('form', { style: S.form, onSubmit: submit },
+    h('input', { style: S.input, placeholder: 'Title', value: title, maxLength: 60, onChange: (e: ChangeEvent<HTMLInputElement>) => setTitle(e.target.value) }),
+    h('textarea', { style: S.textarea, value: content, rows: 6, onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value) }),
+    h('input', { style: S.input, placeholder: 'Tags, comma-separated', value: tags, onChange: (e: ChangeEvent<HTMLInputElement>) => setTags(e.target.value) }),
+    formError !== null ? h('div', { style: S.error }, formError) : null,
+    h('div', null,
+      h('button', { style: S.button, type: 'submit', disabled: saving || title.trim() === '' || content.trim() === '' }, saving ? 'Saving…' : 'Save changes'),
+      ' ',
+      h('button', { style: S.button, type: 'button', onClick: props.onDone }, 'Cancel'),
     ),
-    e.id !== undefined
-      ? h('button', {
-          style: S.smallButton, title: 'Delete this memory',
-          disabled: deleting === e.id,
-          onClick: () => del(e),
-        }, deleting === e.id ? '…' : '×')
-      : null,
-  )))
+  )
 }
 
 function UserSection(props: { info: ScopeInfo | undefined, query: string, onSaved: () => void }): ReactElement {

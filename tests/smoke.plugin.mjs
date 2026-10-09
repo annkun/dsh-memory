@@ -223,3 +223,42 @@ test('P2.1 POST /delete：恶意 id（路径穿越）被拒', async () => {
   assert.equal(status, 400)
   assert.match(JSON.parse(resBody).error, /invalid id/)
 })
+
+test('P2.2 修复回归：面板 id 带 .md 后缀也能删除（真实 bug 场景）', async () => {
+  const saved = await postSave({ scope: 'user', title: 'Dot-md id test', content: 'Panel parses ids from index lines, which carry the .md suffix.' })
+  assert.equal(saved.status, 200)
+  const route = webRoutes.find(r => r.path === '/dsh-memory/api/v1/delete' && r.method === 'POST')
+  const req = { async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ scope: 'user', id: `${saved.data.id}.md` })) } } // 带 .md！
+  let status = 0, resBody = ''
+  const res = { writeHead: s => { status = s }, end: s => { resBody = s } }
+  await route.handler(req, res)
+  for (let i = 0; i < 50 && resBody === ''; i++) await new Promise(r => setTimeout(r, 10))
+  assert.equal(status, 200, `带 .md 的 id 应可删（面板真实场景），body=${resBody}`)
+})
+
+test('P2.2 read + update：编辑单条记忆端到端', async () => {
+  const saved = await postSave({ scope: 'user', title: 'Edit me original', content: 'Original content.', tags: ['before'] })
+  assert.equal(saved.status, 200)
+  const id = saved.data.id
+  const call = async (ep, body) => {
+    const route = webRoutes.find(r => r.path === ep && r.method === 'POST')
+    const req = { async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }
+    let status = 0, resBody = ''
+    const res = { writeHead: s => { status = s }, end: s => { resBody = s } }
+    await route.handler(req, res)
+    for (let i = 0; i < 50 && resBody === ''; i++) await new Promise(r => setTimeout(r, 10))
+    return { status, data: JSON.parse(resBody) }
+  }
+  const read = await call('/dsh-memory/api/v1/read', { scope: 'user', id })
+  assert.equal(read.status, 200)
+  assert.equal(read.data.content, 'Original content.')
+  assert.deepEqual(read.data.tags, ['before'])
+  const upd = await call('/dsh-memory/api/v1/update', { scope: 'user', id, title: 'Edit me revised', content: 'Revised content.', tags: ['after'] })
+  assert.equal(upd.status, 200, `update 应成功: ${JSON.stringify(upd)}`)
+  const reread = await call('/dsh-memory/api/v1/read', { scope: 'user', id })
+  assert.equal(reread.data.title, 'Edit me revised')
+  assert.equal(reread.data.content, 'Revised content.')
+  assert.deepEqual(reread.data.tags, ['after'])
+  const index = await fs.readFile(path.join(tmp, 'MEMORY.md'), 'utf8')
+  assert.ok(index.includes('Edit me revised') && !index.includes('Edit me original'), '索引行应以新标题替换旧行')
+})

@@ -448,7 +448,7 @@ async function handlePanelDelete(ctx: Context, request: IncomingMessage, respons
       if (chunks.reduce((n, c) => n + c.length, 0) > 10_000) { reply(413, { ok: false, error: 'body too large' }); return }
     }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { scope?: unknown, workspace?: unknown, id?: unknown }
-    const id = String(body.id ?? '')
+    const id = String(body.id ?? '').replace(/\.md$/, '')
     if (!/^[a-zA-Z0-9\u4e00-\u9fff_-]+$/.test(id)) { reply(400, { ok: false, error: 'invalid id' }); return }
     let base: string | undefined
     if (body.scope === 'user') {
@@ -471,6 +471,118 @@ async function handlePanelDelete(ctx: Context, request: IncomingMessage, respons
     const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${id}.md)`))
     const kept = await writeIndexGuarded(base, lines)
     reply(200, { ok: true, deleted: id, indexEntries: kept })
+  } catch (e) {
+    reply(400, { ok: false, error: String((e as Error)?.message ?? e) })
+  }
+}
+
+/**
+ * Panel update endpoint (P2.2): { scope, workspace?, id, title?, content?, tags? }.
+ * Rewrites one memory in place — same file (stable id), refreshed saved_at,
+ * rebuilt index line. Only the given fields change; path tag and file name stay.
+ */
+async function handlePanelUpdate(ctx: Context, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const reply = (status: number, body: unknown): void => {
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify(body))
+  }
+  try {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) {
+      chunks.push(chunk as Buffer)
+      if (chunks.reduce((n, c) => n + c.length, 0) > 1_000_000) { reply(413, { ok: false, error: 'body too large' }); return }
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { scope?: unknown, workspace?: unknown, id?: unknown, title?: unknown, content?: unknown, tags?: unknown }
+    const rawId = String(body.id ?? '').replace(/\.md$/, '')
+    if (!/^[a-zA-Z0-9\u4e00-\u9fff_-]+$/.test(rawId)) { reply(400, { ok: false, error: 'invalid id' }); return }
+    const title = body.title === undefined ? undefined : safeSlice(String(body.title).trim(), 60)
+    const content = body.content === undefined ? undefined : safeSlice(String(body.content).trim(), MAX_CONTENT_CHARS)
+    const tags = Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === 'string').slice(0, 10) : undefined
+    if (title === '') { reply(400, { ok: false, error: 'title must be non-empty' }); return }
+    if (content === '') { reply(400, { ok: false, error: 'content must be non-empty' }); return }
+    let base: string | undefined
+    if (body.scope === 'user') {
+      base = scopeDir('user')
+    } else if (body.scope === 'project') {
+      if (body.workspace !== undefined) {
+        const root = path.resolve(String(body.workspace))
+        if (!(await knownWorkspaces(ctx)).includes(root)) { reply(400, { ok: false, error: 'unknown workspace' }); return }
+        base = path.join(root, '.dsh', 'memory')
+      } else {
+        base = PROJECT_DIR
+      }
+    } else {
+      reply(400, { ok: false, error: 'scope must be "user" or "project"' }); return
+    }
+    if (base === undefined) { reply(400, { ok: false, error: 'target scope unavailable' }); return }
+    const file = path.join(memoryDirOf(base), `${rawId}.md`)
+    if (!existsSync(file)) { reply(404, { ok: false, error: 'memory not found' }); return }
+    const text = await fs.readFile(file, 'utf8')
+    const fm = /^---\n([\s\S]*?)\n---\n\n# (.*)\n\n([\s\S]*)$/.exec(text)
+    if (fm === null) { reply(422, { ok: false, error: 'unrecognized memory file format' }); return }
+    const oldPath = /^path: (.*)$/m.exec(fm[1]!)?.[1] ?? ''
+    const oldScope = /^scope: (.*)$/m.exec(fm[1]!)?.[1] ?? String(body.scope)
+    const newTitle = title ?? fm[2]!
+    const newContent = content ?? fm[3]!
+    const newTags = tags ?? (/^tags: (.*)$/m.exec(fm[1]!)?.[1] ?? '').split(',').map(s => s.trim()).filter(s => s !== '')
+    const now = new Date()
+    const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
+    const header = `---\nid: ${rawId}\nscope: ${oldScope}\npath: ${oldPath}\nsaved_at: ${now.toISOString()}\ntags: ${newTags.join(', ')}\n---\n\n# ${newTitle}\n\n`
+    await atomicWriteFile(file, header + newContent + '\n')
+    const tagSuffix = newTags.length ? ` \`${newTags.join('` `')}\`` : ''
+    const pathTag = oldPath !== '' ? ` [${oldPath}]` : ''
+    const indexLine = `- [${indexSafe(newTitle)}](memories/${rawId}.md) — ${indexSafe(safeSlice(newContent.split('\n')[0] ?? '', 80))} (${date})${pathTag}${tagSuffix}`
+    const lines = (await readIndex(base)).filter(l => !l.includes(`(memories/${rawId}.md)`))
+    lines.unshift(indexLine)
+    const kept = await writeIndexGuarded(base, lines)
+    reply(200, { ok: true, updated: rawId, title: newTitle, indexEntries: kept })
+  } catch (e) {
+    reply(400, { ok: false, error: String((e as Error)?.message ?? e) })
+  }
+}
+
+/**
+ * Panel read endpoint (P2.2): { scope, workspace?, id } → full memory text
+ * for the edit form. The panel list only carries index-line excerpts; the
+ * original content is fetched on demand, one memory at a time.
+ */
+async function handlePanelRead(ctx: Context, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const reply = (status: number, body: unknown): void => {
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify(body))
+  }
+  try {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) {
+      chunks.push(chunk as Buffer)
+      if (chunks.reduce((n, c) => n + c.length, 0) > 10_000) { reply(413, { ok: false, error: 'body too large' }); return }
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { scope?: unknown, workspace?: unknown, id?: unknown }
+    const id = String(body.id ?? '').replace(/\.md$/, '')
+    if (!/^[a-zA-Z0-9\u4e00-\u9fff_-]+$/.test(id)) { reply(400, { ok: false, error: 'invalid id' }); return }
+    let base: string | undefined
+    if (body.scope === 'user') {
+      base = scopeDir('user')
+    } else if (body.scope === 'project') {
+      if (body.workspace !== undefined) {
+        const root = path.resolve(String(body.workspace))
+        if (!(await knownWorkspaces(ctx)).includes(root)) { reply(400, { ok: false, error: 'unknown workspace' }); return }
+        base = path.join(root, '.dsh', 'memory')
+      } else {
+        base = PROJECT_DIR
+      }
+    } else {
+      reply(400, { ok: false, error: 'scope must be "user" or "project"' }); return
+    }
+    if (base === undefined) { reply(400, { ok: false, error: 'target scope unavailable' }); return }
+    const file = path.join(memoryDirOf(base), `${id}.md`)
+    if (!existsSync(file)) { reply(404, { ok: false, error: 'memory not found' }); return }
+    const text = await fs.readFile(file, 'utf8')
+    const fm = /^---\n([\s\S]*?)\n---\n\n# (.*)\n\n([\s\S]*)$/.exec(text)
+    if (fm === null) { reply(422, { ok: false, error: 'unrecognized memory file format' }); return }
+    const memPath = /^path: (.*)$/m.exec(fm[1]!)?.[1] ?? ''
+    const tags = (/^tags: (.*)$/m.exec(fm[1]!)?.[1] ?? '').split(',').map(s => s.trim()).filter(s => s !== '')
+    reply(200, { ok: true, id, title: fm[2], content: fm[3]!.replace(/\n$/, ''), path: memPath, tags }) // strip the storage-format trailing newline
   } catch (e) {
     reply(400, { ok: false, error: String((e as Error)?.message ?? e) })
   }
@@ -846,6 +958,20 @@ export async function apply(ctx: Context): Promise<void> {
       path: '/dsh-memory/api/v1/delete',
       handler: (request, response) => {
         void handlePanelDelete(ctx, request, response)
+      },
+    })
+    webServer.register({
+      method: 'POST',
+      path: '/dsh-memory/api/v1/update',
+      handler: (request, response) => {
+        void handlePanelUpdate(ctx, request, response)
+      },
+    })
+    webServer.register({
+      method: 'POST',
+      path: '/dsh-memory/api/v1/read',
+      handler: (request, response) => {
+        void handlePanelRead(ctx, request, response)
       },
     })
   })
