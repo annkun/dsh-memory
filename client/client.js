@@ -274,7 +274,10 @@ window.__ModuleLoader__.load({
 			}, (0, react.createElement)("div", { style: S.error }, rowError)) : null, props.entries.map((e, i) => {
 				if (e.id !== void 0 && editing === e.id) return (0, react.createElement)("li", {
 					key: e.id,
-					style: S.item
+					style: {
+						...S.item,
+						display: "block"
+					}
 				}, (0, react.createElement)(MemoryForm, {
 					target: props.target,
 					initial: e,

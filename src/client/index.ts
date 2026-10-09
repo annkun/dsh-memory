@@ -208,7 +208,9 @@ function EntryList(props: { entries: PanelEntry[], query: string, target: SaveTa
     rowError !== null ? h('li', { key: 'error', style: S.item }, h('div', { style: S.error }, rowError)) : null,
     props.entries.map((e, i) => {
       if (e.id !== undefined && editing === e.id) {
-        return h('li', { key: e.id, style: S.item },
+        // block layout: the form must span the full row like the add form,
+        // not shrink as a flex child of the entry row style
+        return h('li', { key: e.id, style: { ...S.item, display: 'block' } },
           h(MemoryForm, { target: props.target, initial: e, onDone: () => { setEditing(null); props.onSaved() } }))
       }
       return h('li', { key: e.id ?? i, style: S.item },
