@@ -1306,13 +1306,13 @@ export async function apply(ctx: Context): Promise<void> {
         for (const f of files) {
           if (matches.length >= limit) break
           if (f.toLowerCase().includes(lower)) {
-            matches.push({ scope, id: f.replace(/\.md$/, ''), title: f.replace(/\.md$/, ''), excerpt: '(id match)', workspace: scope === 'project' ? path.resolve(base, '..', '..') : undefined }) // B2: same entry shape as the content branch
+            matches.push({ scope, id: f.replace(/\.md$/, ''), title: f.replace(/\.md$/, ''), excerpt: '(id match)', ...(scope === 'project' ? { workspace: path.resolve(base, '..', '..') } : {}) }) // B2: same entry shape as the content branch
             continue
           }
           const text = await fs.readFile(path.join(dir, f), 'utf8').catch(() => '')
           if (text.toLowerCase().includes(lower)) {
             const titleLine = /^#\s+(.+)$/m.exec(text)?.[1] ?? f
-            matches.push({ scope, id: f.replace(/\.md$/, ''), title: titleLine, excerpt: excerpt(text, q), workspace: scope === 'project' ? path.resolve(base, '..', '..') : undefined }) // B2: model can tell which workspace a project hit came from
+            matches.push({ scope, id: f.replace(/\.md$/, ''), title: titleLine, excerpt: excerpt(text, q), ...(scope === 'project' ? { workspace: path.resolve(base, '..', '..') } : {}) }) // B2: model can tell which workspace a project hit came from
           }
         }
         }

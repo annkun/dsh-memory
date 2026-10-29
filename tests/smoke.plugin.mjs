@@ -74,6 +74,24 @@ test('memory_search 大小写不敏感跨域检索', async () => {
   assert.ok(byContent.matches[0].excerpt.includes('pnpm'), `excerpt 应含正文: ${byContent.matches[0].excerpt}`)
 })
 
+test('memory_search 用户作用域命中：返回值可无损 JSON 往返（无 undefined 属性）', async () => {
+  // 回归：DSH 在把工具结果写进会话前会做 lossless-JSON 快照校验
+  //（dsh-session-format / snapshotJsonValue），任何值为 undefined 的属性
+  // 都会让整次工具调用失败并报 "value is not lossless JSON"。
+  // 用户作用域命中曾因 `workspace: … : undefined` 精确踩中该失败。
+  await tool('memory_save').execute(
+    { scope: 'user', title: 'Reply in Chinese', content: '个人偏好：一律用简体中文回复。' }, exec)
+  const userHit = await tool('memory_search').execute({ query: '简体中文', scope: 'user' }, exec)
+  assert.equal(userHit.total, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(userHit)), userHit, '返回值必须可无损 JSON 往返（不得含 undefined 属性）')
+  assert.ok(!('workspace' in userHit.matches[0]), '用户作用域命中不应带 workspace 键')
+  // 项目作用域命中仍带 workspace，模型据此区分记忆来自哪个工作区
+  const projectHit = await tool('memory_search').execute({ query: '用户偏好' }, exec)
+  const projectMatch = projectHit.matches.find(m => m.scope === 'project')
+  assert.ok(projectMatch && typeof projectMatch.workspace === 'string' && projectMatch.workspace.length > 0,
+    '项目作用域命中应带 workspace 路径')
+})
+
 test('memory_read 返回 Claude 契约字段', async () => {
   const r = await tool('memory_read').execute({ id: savedId }, exec)
   assert.ok(r.content.includes('pnpm'))
